@@ -36,6 +36,17 @@ const CSS = `
 .mb-test-img { width: 64px; height: 64px; border-radius: 6px; border: 1px solid var(--border-color, #555); }
 .mb-dialog a { color: var(--p-primary-color, #60a5fa); }
 .mb-list { margin: 4px 0 8px; padding-left: 20px; font-size: 13px; }
+.mb-select { background: var(--comfy-input-bg, #111); color: inherit; border: 1px solid var(--border-color, #555); border-radius: 6px; padding: 6px 8px; }
+.mb-scroll { max-height: 240px; overflow: auto; margin-top: 6px; }
+.mb-item { display: grid; grid-template-columns: 1fr auto auto; gap: 2px 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border-color, #333); font-size: 13px; }
+.mb-item:last-child { border-bottom: 0; }
+.mb-item .mb-name { word-break: break-all; }
+.mb-item .mb-btn { padding: 3px 10px; font-size: 13px; }
+.mb-size { opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mb-bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--border-color, #444); overflow: hidden; }
+.mb-bar > div { height: 100%; background: var(--p-primary-color, #3b82f6); transition: width .4s; }
+.mb-bar.indeterminate > div { width: 30% !important; animation: mb-slide 1.2s ease-in-out infinite; }
+@keyframes mb-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
 `;
 
 // Build DOM without innerHTML, so server text (errors, log lines) is never parsed as HTML.
@@ -292,4 +303,182 @@ export async function openHealth({ onFix } = {}) {
       `after each run: ${sp.estimated_text ?? "$0.00"}. Modal's figures above are the real ones.`),
     h("p", { class: "mb-muted" }, h("a", { href: BUDGETS_URL, target: "_blank", rel: "noopener" }, "Set a spending limit in Modal")));
   d.body.replaceChildren(h("div", { class: "mb-step" }, ...rows), spend);
+}
+
+// -- cloud models (spec §6.5, #21) -----------------------------------------------------------
+
+export function formatBytes(n) {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  return `${(n / 1024 ** i).toFixed(i >= 3 ? 2 : i ? 1 : 0)} ${units[i]}`;
+}
+
+const STATE_TEXT = { starting: "Starting...", preparing: "Preparing (reading the file)...", cancelling: "Stopping...",
+  done: "Done", cancelled: "Stopped" };
+const ACTIVE = ["starting", "preparing", "running", "cancelling"];
+const LIST_LIMIT = 300;
+
+// replaceChildren() would add "null" as text for the optional parts.
+const fill = (el, ...children) => el.replaceChildren(...children.flat().filter((c) => c != null && c !== false && c !== ""));
+
+let modelsOpen = null;
+
+export async function openModels({ onChanged } = {}) {
+  if (modelsOpen) return;
+  const ui = { list: null, error: null, busy: {}, actionError: null, confirm: null, filter: "" };
+  const onTransfers = ({ detail }) => {
+    if (!ui.list) return;
+    const before = new Map((ui.list.transfers || []).map((t) => [t.id, t.state]));
+    ui.list.transfers = detail.transfers || [];
+    renderTransfers();
+    renderLists();
+    if (ui.list.transfers.some((t) => t.state === "done" && before.has(t.id) && before.get(t.id) !== "done")) load();
+  };
+  api.addEventListener("modal_bridge.models", onTransfers);
+  const d = dialog("Cloud models", () => {
+    api.removeEventListener("modal_bridge.models", onTransfers);
+    modelsOpen = null;
+  });
+  modelsOpen = d;
+
+  // Inputs are built once so typing survives the re-renders that progress events cause.
+  const url = h("input", { class: "mb-input", placeholder: "Hugging Face file link or Civitai model page", autocomplete: "off",
+    "aria-label": "Model link", onkeydown: (e) => e.key === "Enter" && add() });
+  const folder = h("select", { class: "mb-select", "aria-label": "Model folder" });
+  const filename = h("input", { class: "mb-input", placeholder: "File name (optional)", autocomplete: "off", "aria-label": "File name" });
+  const addBtn = h("button", { class: "mb-btn", onclick: () => add() }, "Download to cloud");
+  const addMsg = h("div");
+  const filter = h("input", { class: "mb-input", placeholder: "Filter models", autocomplete: "off", "aria-label": "Filter models",
+    oninput: () => { ui.filter = filter.value.trim().toLowerCase(); renderLists(); } });
+  const transfersBox = h("div");
+  const cloudBox = h("div");
+  const localBox = h("div");
+  const topMsg = h("div");
+
+  d.body.append(
+    topMsg,
+    h("div", { class: "mb-step" }, h("h3", {}, "Add a model from a link"),
+      h("p", { class: "mb-muted" },
+        "Paste a Hugging Face file link or a Civitai model page. Your Modal account downloads it directly, so nothing passes through this computer. " +
+        "Gated or Civitai models may need a key (Setup, step 2)."),
+      h("div", { class: "mb-row" }, url),
+      h("div", { class: "mb-row" }, folder, filename, addBtn),
+      addMsg),
+    transfersBox,
+    h("div", { class: "mb-step" }, h("div", { class: "mb-row" }, filter), cloudBox),
+    h("div", { class: "mb-step" }, localBox));
+
+  async function load() {
+    try {
+      ui.list = await call("/modal_bridge/models");
+      ui.error = null;
+    } catch (e) {
+      ui.error = e.message;
+    }
+    render();
+  }
+
+  async function act(key, fn) {
+    ui.busy[key] = true;
+    ui.actionError = null;
+    render();
+    try {
+      await fn();
+    } catch (e) {
+      ui.actionError = e.message;
+    }
+    ui.busy[key] = false;
+    await load();
+    onChanged?.();
+  }
+
+  function add() {
+    if (!url.value.trim() || ui.busy.add) return;
+    act("add", async () => {
+      await call("/modal_bridge/models/download", { url: url.value.trim(), folder: folder.value, filename: filename.value.trim() });
+      url.value = "";
+      filename.value = "";
+    });
+  }
+
+  const matches = (m) => !ui.filter || `${m.folder}/${m.name}`.toLowerCase().includes(ui.filter);
+
+  function render() {
+    fill(topMsg, ui.error ? h("p", { class: "mb-fail" }, ui.error) : ui.list ? "" : h("p", { class: "mb-muted" }, "Loading..."));
+    if (ui.list && !folder.options.length) {
+      for (const f of ui.list.folders) folder.append(h("option", { value: f }, f));
+    }
+    addBtn.disabled = !ui.list || !!ui.busy.add;
+    addBtn.textContent = ui.busy.add ? "Starting..." : "Download to cloud";
+    fill(addMsg, ui.actionError ? h("p", { class: "mb-fail" }, ui.actionError) : "");
+    renderTransfers();
+    renderLists();
+  }
+
+  function renderTransfers() {
+    const ts = ui.list?.transfers || [];
+    fill(transfersBox, ts.length ? h("div", { class: "mb-step" }, h("h3", {}, "Transfers"),
+      ts.slice().reverse().map((t) => {
+        const known = t.total > 0;
+        const pct = known ? Math.min(100, (100 * t.done) / t.total) : 0;
+        const active = ACTIVE.includes(t.state);
+        const finishing = t.state === "running" && known && t.done >= t.total; // sent; Modal is saving it
+        const status = t.state === "error" ? h("span", { class: "mb-fail" }, t.error)
+          : finishing ? h("span", { class: "mb-muted" }, "Finishing...")
+          : t.state === "running" ? h("span", { class: "mb-size" }, known ? `${formatBytes(t.done)} of ${formatBytes(t.total)}` : formatBytes(t.done))
+          : h("span", { class: t.state === "done" ? "mb-ok" : "mb-muted" }, STATE_TEXT[t.state] ?? t.state);
+        return h("div", { class: "mb-item" },
+          h("span", { class: "mb-name" }, `${t.kind === "upload" ? "↑" : "↓"} ${t.folder}/${t.name}`),
+          status,
+          t.kind === "download" && active && t.state !== "cancelling"
+            ? h("button", { class: "mb-btn secondary", onclick: () => act(`cancel-${t.id}`, () => call("/modal_bridge/models/cancel", { id: t.id })) }, "Stop")
+            : h("span"),
+          active ? h("div", { class: `mb-bar${known && t.state === "running" && !finishing ? "" : " indeterminate"}` }, h("div", { style: `width: ${pct}%` })) : null);
+      })) : "");
+  }
+
+  function renderLists() {
+    if (!ui.list) return;
+    const cloud = ui.list.cloud.filter(matches);
+    const total = ui.list.cloud.reduce((n, m) => n + m.size, 0);
+    fill(cloudBox,
+      h("h3", {}, `In your cloud (${ui.list.cloud.length}, ${formatBytes(total)})`),
+      ui.list.cloud.length ? null : h("p", { class: "mb-muted" }, "No models yet. Add one from a link above, or upload one from this computer below."),
+      h("div", { class: "mb-scroll" }, cloud.slice(0, LIST_LIMIT).map((m) => {
+        const confirming = ui.confirm === m.path;
+        return h("div", { class: "mb-item" },
+          h("span", { class: "mb-name" }, m.path),
+          h("span", { class: "mb-size" }, formatBytes(m.size)),
+          h("button", {
+            class: confirming ? "mb-btn" : "mb-btn secondary", disabled: !!ui.busy[`del-${m.path}`],
+            title: "Delete from your Modal cloud. A copy on this computer, if any, stays.",
+            onclick: () => {
+              if (!confirming) { ui.confirm = m.path; return renderLists(); }
+              ui.confirm = null;
+              act(`del-${m.path}`, () => call("/modal_bridge/models/delete", { path: m.path }));
+            },
+          }, confirming ? "Really delete?" : "Delete"));
+      })),
+      cloud.length > LIST_LIMIT ? h("p", { class: "mb-muted" }, `Showing ${LIST_LIMIT} of ${cloud.length}. Filter to find others.`) : null);
+
+    const uploading = new Set((ui.list.transfers || []).filter((t) => t.kind === "upload" && ACTIVE.includes(t.state)).map((t) => `${t.folder}/${t.name}`));
+    const local = ui.list.local.filter(matches);
+    fill(localBox, 
+      h("h3", {}, `Only on this computer (${ui.list.local.length})`),
+      h("p", { class: "mb-muted" }, "Upload a model to use it in the cloud. Big files take a while on a home connection; you can close this window meanwhile."),
+      h("div", { class: "mb-scroll" }, local.slice(0, LIST_LIMIT).map((m) => {
+        const key = `${m.folder}/${m.name}`;
+        return h("div", { class: "mb-item" },
+          h("span", { class: "mb-name" }, key),
+          h("span", { class: "mb-size" }, formatBytes(m.size)),
+          h("button", { class: "mb-btn secondary", disabled: uploading.has(key) || !!ui.busy[`up-${key}`],
+            onclick: () => act(`up-${key}`, () => call("/modal_bridge/models/upload", { folder: m.folder, name: m.name })) },
+            uploading.has(key) ? "Uploading..." : "Upload"));
+      })),
+      local.length > LIST_LIMIT ? h("p", { class: "mb-muted" }, `Showing ${LIST_LIMIT} of ${local.length}. Filter to find others.`) : null);
+  }
+
+  render();
+  await load();
 }

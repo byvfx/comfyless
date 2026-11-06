@@ -3,7 +3,7 @@
 // response, so the frontend's own queueing, error display and progress tracking keep working.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { openHealth, openSetup } from "./setup_wizard.js";
+import { openHealth, openModels, openSetup } from "./setup_wizard.js";
 
 const EXT = "ModalBridge";
 const SETTING = {
@@ -58,6 +58,10 @@ function showSetup() {
     scaledownS: Math.round(Number(setting(SETTING.idleMinutes)) * 60),
     onDone: () => refreshStatus(),
   });
+}
+
+function showModels() {
+  openModels({ onChanged: () => app.refreshComboInNodes?.() });
 }
 
 function showHealth() {
@@ -167,6 +171,22 @@ function listenForStatus() {
       toast("success", "Modal Cloud connected", "Turn on Run on Cloud next to the Run button.", 4000);
     }
   });
+  // Model uploads and downloads keep going after the Cloud models window closes; say when each ends.
+  const transferStates = new Map();
+  api.addEventListener("modal_bridge.models", async ({ detail }) => {
+    for (const t of detail.transfers || []) {
+      const was = transferStates.get(t.id);
+      transferStates.set(t.id, t.state);
+      if (!was || was === t.state) continue;
+      const what = `${t.folder}/${t.name}`;
+      if (t.state === "done") {
+        await app.refreshComboInNodes?.();
+        toast("success", t.kind === "upload" ? "Uploaded to the cloud" : "Downloaded to the cloud", what, 5000);
+      } else if (t.state === "error") {
+        toast("error", t.kind === "upload" ? "Upload failed" : "Cloud download failed", `${what}: ${t.error}`, 10000);
+      }
+    }
+  });
   api.addEventListener("execution_start", ({ detail }) => (runningPromptId = detail?.prompt_id ?? null));
   const finished = ({ detail }) => {
     cloudJobs.delete(detail?.prompt_id);
@@ -213,6 +233,7 @@ app.registerExtension({
     { id: "ModalBridge.Toggle", label: "Toggle Run on Cloud", icon: "pi pi-cloud", function: toggleCloud },
     { id: "ModalBridge.Setup", label: "Setup (sign in, deploy, test)", icon: "pi pi-cog", function: showSetup },
     { id: "ModalBridge.Health", label: "Check setup and spending", icon: "pi pi-heart", function: showHealth },
+    { id: "ModalBridge.Models", label: "Cloud models", icon: "pi pi-database", function: showModels },
     {
       id: "ModalBridge.SyncModels",
       label: "Refresh cloud model list",
@@ -229,7 +250,7 @@ app.registerExtension({
   menuCommands: [
     {
       path: ["Extensions", "Modal Cloud"],
-      commands: ["ModalBridge.Toggle", "ModalBridge.Setup", "ModalBridge.Health", "ModalBridge.SyncModels"],
+      commands: ["ModalBridge.Toggle", "ModalBridge.Setup", "ModalBridge.Health", "ModalBridge.Models", "ModalBridge.SyncModels"],
     },
   ],
   actionBarButtons: [toggleButton],

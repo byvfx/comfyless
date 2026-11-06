@@ -3,7 +3,8 @@
 POST /modal_bridge/prompt mirrors POST /prompt: same request body, same response shape (including
 400 + node_errors), so the frontend's error display and node highlighting work unchanged.
 
-/modal_bridge/setup/* and /modal_bridge/health drive the setup wizard. They only answer requests
+/modal_bridge/setup/*, /modal_bridge/health and the cloud model manager (/modal_bridge/models,
+/modal_bridge/models/*) drive the setup dialogs. They only answer requests
 from this computer: with --listen, someone else on the network could otherwise read a sign-in link
 and attach this ComfyUI to their own Modal account, or redeploy it.
 """
@@ -22,6 +23,7 @@ from . import config, errors
 from . import inputs as inputs_mod
 from .cloud_nodes import cloud_nodes
 from .modal_client import get_client
+from .models_manager import ModelManager
 from .models_sync import cloud_models
 from .runner import CloudJob, CloudRunner
 from .setup import Setup
@@ -36,6 +38,7 @@ _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 _runner: CloudRunner | None = None
 _setup: Setup | None = None
+_models: ModelManager | None = None
 
 
 def _bad_request(error_type: str, message: str, details: str = "", node_errors: dict | None = None):
@@ -77,6 +80,8 @@ def _busy(*kinds: str) -> str | None:
         return "Wait for the cloud worker install (deploy) to finish first."
     if "login" in kinds and _setup.switching_account:
         return "Switching to your new Modal account once running cloud work finishes. Try again in a moment."
+    if "models" in kinds and _models.active:
+        return "Wait for the model uploads and downloads to finish first."
     return None
 
 
@@ -109,11 +114,12 @@ async def _connect() -> None:
 
 
 def setup() -> None:
-    global _runner, _setup
+    global _runner, _setup, _models
     server = PromptServer.instance
     routes = server.routes
     _runner = CloudRunner(get_client())
-    _setup = Setup(_connect, lambda: _busy("jobs", "test", "deploy"))
+    _setup = Setup(_connect, lambda: _busy("jobs", "test", "deploy", "models"))
+    _models = ModelManager(_sync_models)
     server.loop.create_task(_connect())
 
     @routes.post("/modal_bridge/prompt")
@@ -155,7 +161,7 @@ def setup() -> None:
             return _bad_request(
                 "prompt_outputs_failed_validation",
                 "Some models are only on this computer",
-                "Upload them to your Modal models volume or choose models that are in the cloud.",
+                "Upload them in Extensions > Modal Cloud > Cloud models, or choose models that are in the cloud.",
                 missing,
             )
 
@@ -240,7 +246,7 @@ def setup() -> None:
     async def post_deploy(request: web.Request):
         if (denied := _local_only(request)) is not None:
             return denied
-        if _setup.deploy["state"] != "running" and (reason := _busy("jobs", "test", "login")):
+        if _setup.deploy["state"] != "running" and (reason := _busy("jobs", "test", "login", "models")):
             return web.json_response({"error": reason}, status=409)
         # "recreate" stops warm GPUs so the next job runs the new code; no job is running now.
         _setup.start_deploy(recreate=True)
@@ -273,3 +279,46 @@ def setup() -> None:
         if (denied := _local_only(request, mutating=False)) is not None:
             return denied
         return web.json_response(await _setup.health())
+
+    # -- cloud model manager (spec §6.5, #21) ---------------------------------------------------
+
+    async def _models_action(request: web.Request, action, *busy_kinds: str):
+        if (denied := _local_only(request)) is not None:
+            return denied
+        if reason := _busy(*busy_kinds):
+            return web.json_response({"error": reason}, status=409)
+        body = await _json_body(request)
+        try:
+            result = await action({k: v for k, v in body.items() if isinstance(v, str)})
+        except Exception as exc:
+            return web.json_response({"error": errors.friendly(exc)}, status=400 if isinstance(exc, errors.BridgeError) else 502)
+        return web.json_response(result or {})
+
+    @routes.get("/modal_bridge/models")
+    async def get_models(request: web.Request):
+        if (denied := _local_only(request, mutating=False)) is not None:
+            return denied
+        try:
+            return web.json_response(await _models.listing())
+        except Exception as exc:
+            return web.json_response({"error": errors.friendly(exc)}, status=502)
+
+    @routes.post("/modal_bridge/models/download")
+    async def post_model_download(request: web.Request):
+        return await _models_action(
+            request, lambda b: _models.start_download(b.get("url", ""), b.get("folder", ""), b.get("filename", "")),
+            "login", "deploy")
+
+    @routes.post("/modal_bridge/models/upload")
+    async def post_model_upload(request: web.Request):
+        return await _models_action(
+            request, lambda b: _models.start_upload(b.get("folder", ""), b.get("name", "")), "login", "deploy")
+
+    @routes.post("/modal_bridge/models/cancel")
+    async def post_model_cancel(request: web.Request):
+        return await _models_action(request, lambda b: _models.cancel(b.get("id", "")))
+
+    @routes.post("/modal_bridge/models/delete")
+    async def post_model_delete(request: web.Request):
+        # A running job may be reading the file.
+        return await _models_action(request, lambda b: _models.delete(b.get("path", "")), "jobs", "login", "deploy")

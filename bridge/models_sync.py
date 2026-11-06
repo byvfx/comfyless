@@ -110,7 +110,7 @@ class CloudModels:
                             "type": "custom_validation_failed",
                             "message": "Model is only on this computer",
                             "details": f"{input_name}: {value} is only on this computer, not in your Modal cloud. "
-                            "Upload it or pick a cloud model.",
+                            "Upload it in Extensions > Modal Cloud > Cloud models, or pick a cloud model.",
                             "extra_info": {"input_name": input_name},
                         }
                     )

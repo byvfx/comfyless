@@ -13,6 +13,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -653,16 +654,17 @@ class ComfyWorker:
     secrets=[bridge_secret],
     timeout=3 * 60 * 60,
 )
-def download_model(url: str, dest: str) -> dict:
-    """Stream a model from a URL straight into the models volume, e.g. dest="checkpoints/x.safetensors".
+def download_model(url: str, dest: str, progress_key: str | None = None) -> dict:
+    """Stream a model from a URL straight into the models volume.
 
-    Uses HF_TOKEN / CIVITAI_TOKEN from the bridge secret when present (gated repos, Civitai downloads).
+    dest is "folder/filename", or "folder/" to name the file after the download (Content-Disposition,
+    then the URL path). Uses HF_TOKEN / CIVITAI_TOKEN from the bridge secret when present (gated
+    repos, Civitai downloads). With progress_key, progress events go to that events-queue partition.
     """
     import os
 
     import requests
 
-    target = _safe_join(Path(MODELS_MOUNT), dest)
     parsed = urllib.parse.urlparse(url)
     host = parsed.hostname or ""
 
@@ -677,17 +679,67 @@ def download_model(url: str, dest: str) -> dict:
     elif is_host("civitai.com") and os.environ.get("CIVITAI_TOKEN"):
         headers["Authorization"] = f"Bearer {os.environ['CIVITAI_TOKEN']}"
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_name(target.name + ".partial")
+    events = modal.Queue.from_name(EVENTS_QUEUE, create_if_missing=True) if progress_key else None
+
+    def report(data: dict) -> None:
+        if events is not None:
+            try:
+                events.put({"type": "download_progress", "data": data, "t": time.time()}, partition=progress_key)
+            except Exception as exc:  # progress is cosmetic; never fail the download over it
+                print(f"[modal-bridge] progress event dropped: {exc}", file=sys.stderr)
+
     t0 = time.time()
     with requests.get(url, headers=headers, stream=True, allow_redirects=True, timeout=60) as resp:
+        if resp.status_code in (401, 403):
+            raise PermissionError(f"{host} refused the download ({resp.status_code}). It may need an access key "
+                                  "(Setup, step 2) or accepting the model's license on its page.")
         resp.raise_for_status()
-        with open(partial, "wb") as fh:
-            for chunk in resp.iter_content(chunk_size=16 * 1024 * 1024):
-                fh.write(chunk)
-    partial.rename(target)
+        if "text/html" in resp.headers.get("content-type", ""):
+            raise ValueError("That link opened a web page, not a file. Use the model file's download link.")
+        if dest.endswith("/"):
+            dest += _download_filename(resp)
+        target = _safe_join(Path(MODELS_MOUNT), dest)
+        if target.exists():
+            raise FileExistsError(f"{dest} is already in your cloud.")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".partial")
+        total = int(resp.headers.get("content-length") or 0)
+        done = 0
+        last = 0.0
+        report({"name": dest, "done": 0, "total": total})
+        try:
+            with open(partial, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=16 * 1024 * 1024):
+                    fh.write(chunk)
+                    done += len(chunk)
+                    if time.time() - last > 2:
+                        last = time.time()
+                        report({"name": dest, "done": done, "total": total})
+            partial.rename(target)
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
     models_vol.commit()
     return {"path": dest, "size": target.stat().st_size, "seconds": time.time() - t0}
+
+
+def _download_filename(resp) -> str:
+    """A safe file name for a download: Content-Disposition first, then the final URL's path."""
+    disposition = resp.headers.get("content-disposition", "")
+    name = None
+    m = re.search(r"filename\*\s*=\s*[^']*''([^;]+)", disposition)
+    if m:
+        name = urllib.parse.unquote(m.group(1).strip().strip('"'))
+    else:
+        m = re.search(r'filename\s*=\s*"?([^";]+)"?', disposition)
+        if m:
+            name = m.group(1).strip()
+    if not name:
+        name = urllib.parse.unquote(PurePosixPath(urllib.parse.urlparse(resp.url).path).name)
+    name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", name).strip(" .")
+    if not name:
+        raise ValueError("Couldn't tell the file name from the download. Enter one.")
+    return name
 
 
 @app.function(image=comfy_image, timeout=5 * 60)

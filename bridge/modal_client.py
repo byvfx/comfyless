@@ -30,6 +30,7 @@ class ModalClient:
         self.io_vol = modal.Volume.from_name(backend.IO_VOLUME)
         self.events = modal.Queue.from_name(backend.EVENTS_QUEUE, create_if_missing=True)
         self._worker_cls = modal.Cls.from_name(backend.APP_NAME, "ComfyWorker")
+        self.download_fn = modal.Function.from_name(backend.APP_NAME, "download_model")
         self._variants: dict[tuple[str, int], Any] = {}
         self.ready = False
         self.error: str | None = None
@@ -77,8 +78,13 @@ class ModalClient:
 
     async def list_models(self) -> list[str]:
         """Relative paths of every file in the models volume, e.g. "checkpoints/x.safetensors"."""
+        return [path for path, _size in await self.list_model_files()]
+
+    async def list_model_files(self) -> list[tuple[str, int]]:
+        """(path, size) of every finished file in the models volume; downloads in progress are left out."""
         entries = await self.models_vol.listdir.aio("/", recursive=True)
-        return [e.path for e in entries if e.type == modal.volume.FileEntryType.FILE]
+        return [(e.path, e.size) for e in entries
+                if e.type == modal.volume.FileEntryType.FILE and not e.path.endswith(".partial")]
 
     async def existing_inputs(self) -> set[str]:
         try:
