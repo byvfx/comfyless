@@ -222,8 +222,19 @@ class ModelManager:
         client = get_client()
         key = f"models-{t['id']}"
         try:
+            if t["state"] == "cancelling":  # stopped before the cloud call was made
+                await self._finish(t)
+                return
             call = await client.download_fn.spawn.aio(url, dest, progress_key=key)
             self._calls[t["id"]] = call
+            if t["state"] == "cancelling":  # stopped while the call was being made (cancel_downloads waits for this)
+                try:
+                    await call.cancel.aio(terminate_containers=True)
+                except Exception as exc:
+                    t["cancel_error"] = errors.friendly(exc)
+                    raise
+                await self._finish(t)
+                return
             result = asyncio.ensure_future(call.get.aio())
             while not result.done():
                 for event in await client.next_events(key, timeout=2):
@@ -238,7 +249,7 @@ class ModelManager:
             await self._finish(t)
         except Exception as exc:
             if t["state"] == "cancelling":
-                await self._finish(t)
+                await self._finish(t, t.get("cancel_error"))  # an error here means it may still be running
             else:
                 await self._finish(t, _download_error(exc))
         finally:
@@ -251,7 +262,38 @@ class ModelManager:
             raise errors.BridgeError("Only a running download can be stopped.")
         t["state"] = "cancelling"
         self._emit()
-        await call.cancel.aio()
+        await call.cancel.aio(terminate_containers=True)  # its container stops billing right away
+
+    async def cancel_downloads(self, timeout_s: float = 60) -> int:
+        """Stop every cloud download ("stop paying now"); uploads need no cloud container.
+
+        Returns only once none can still be running, so the caller may stop the app's containers;
+        raises if one couldn't be cancelled. A download whose call is still being made is marked and
+        cancelled by _download as soon as the call exists.
+        """
+        waiting = []
+        count = 0
+        for tid, t in list(self.transfers.items()):
+            if t["kind"] != "download" or t["state"] not in (*_ACTIVE, "cancelling"):
+                continue
+            count += 1
+            if t["state"] == "cancelling":
+                waiting.append(t)
+            elif tid in self._calls:
+                await self.cancel(tid)  # raises if Modal refuses
+            else:
+                t["state"] = "cancelling"
+                waiting.append(t)
+        if waiting:
+            self._emit()
+        deadline = time.time() + timeout_s
+        while any(t["finished_at"] is None for t in waiting):  # _download finishes them once cancelled
+            if time.time() > deadline:
+                raise errors.BridgeError("A cloud download didn't stop in time. Try Stop now again.")
+            await asyncio.sleep(0.2)
+        if failed := [t for t in waiting if t.get("cancel_error")]:
+            raise errors.BridgeError(f"Couldn't stop the download of {failed[0]['name']} ({failed[0]['cancel_error']}).")
+        return count
 
     async def start_upload(self, folder: str, name: str) -> dict:
         self._check_folder(folder)

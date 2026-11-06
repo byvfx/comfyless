@@ -313,7 +313,7 @@ class Setup:
             "workflow": None,
             "inputs": [],
             "gpu": gpu,
-            "client": {"bridge_version": "0.3.1", "comfyui_version": backend.COMFYUI_VERSION},
+            "client": {"bridge_version": "0.3.2", "comfyui_version": backend.COMFYUI_VERSION},
         }
         t0 = time.time()
         result = await client.worker(gpu, scaledown_s).run.remote.aio(payload)
@@ -428,6 +428,18 @@ class Setup:
                     add("models", "Models in the cloud", "warn", "No models in your cloud yet. Add a checkpoint before running workflows that need one.")
             except Exception as exc:
                 add("models", "Models in the cloud", "fail", errors.friendly(exc))
+
+        if deployed:
+            try:
+                running = len(await client.app_containers())
+                if running:
+                    add("running", "Cloud containers on now", "warn",
+                        f"{running} running, and you pay while they're on. They switch off by themselves after the idle "
+                        "time in Settings → Modal Cloud. Stop now switches them off at once and cancels running cloud jobs.", "stop")
+                else:
+                    add("running", "Cloud containers on now", "ok", "None. Nothing is running in the cloud, so nothing is costing you.")
+            except Exception as exc:
+                add("running", "Cloud containers on now", "warn", f"Couldn't check ({errors.friendly(exc)}).")
 
         if _listening_beyond_this_computer():
             add("network", "Only this computer can start cloud jobs", "warn",

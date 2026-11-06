@@ -51,6 +51,8 @@ class CloudRunner:
         self.current: CloudJob | None = None
         self.current_call = None
         self._interrupted = False
+        self._force_stop = False  # Stop now: cancel with the container, not just INTERRUPT
+        self._spawning = False  # worker.run.spawn is in flight; no call handle yet
         self._worker_started = False
         self._task: asyncio.Task | None = None
 
@@ -80,6 +82,33 @@ class CloudRunner:
         if self.current_call is not None:  # otherwise _run sees the flag once spawn returns
             await self._stop_call(self.current)
         return True
+
+    async def cancel_all(self, timeout_s: float = 60) -> int:
+        """Cancel every cloud job, queued and running ("stop paying now"). Returns how many.
+
+        The running call is cancelled outright, with its container: a container stopped while it
+        still holds an input would get that input rescheduled onto a new one. Returns only once no
+        call can still be holding an input, so the caller may stop the app's containers. Raises if
+        a cancellation fails, so the caller doesn't.
+        """
+        count = 0
+        for job in list(self.pending):
+            count += await self.interrupt(job.prompt_id)
+        if self.current is None:
+            return count
+        self._force_stop = True  # a call whose spawn is still in flight is cancelled the same way (_run)
+        try:
+            count += await self.interrupt()
+            if self.current_call is not None:
+                await self.current_call.cancel.aio(terminate_containers=True)
+        except Exception as exc:
+            raise errors.BridgeError(f"Couldn't cancel the running cloud job ({errors.friendly(exc)}).") from exc
+        deadline = time.time() + timeout_s
+        while self.current is not None and (self._spawning or self.current_call is not None):
+            if time.time() > deadline:
+                raise errors.BridgeError("The running cloud job didn't stop in time. Try Stop now again.")
+            await asyncio.sleep(0.2)
+        return count
 
     async def _stop_call(self, job: CloudJob) -> None:
         await self.client.events.put.aio(backend.INTERRUPT, partition=backend.control_partition(job.prompt_id))
@@ -133,6 +162,7 @@ class CloudRunner:
                 self.current = None
                 self.current_call = None
                 self._interrupted = False
+                self._force_stop = False
                 self._worker_started = False
 
     async def _run(self, job: CloudJob) -> None:
@@ -151,13 +181,20 @@ class CloudRunner:
             "inputs": [f.as_job_entry() for f in job.input_files],
             "partial_execution_targets": job.partial_execution_targets,
             "gpu": job.gpu,
-            "client": {"bridge_version": "0.3.1", "comfyui_version": backend.COMFYUI_VERSION},
+            "client": {"bridge_version": "0.3.2", "comfyui_version": backend.COMFYUI_VERSION},
         }
         worker = self.client.worker(job.gpu, job.scaledown_s)
         sent_at = time.time()
-        self.current_call = await worker.run.spawn.aio(payload)
+        self._spawning = True
+        try:
+            self.current_call = await worker.run.spawn.aio(payload)
+        finally:
+            self._spawning = False
         if self._interrupted:  # cancelled while spawn was in flight
-            await self._stop_call(job)
+            if self._force_stop:  # Stop now: end the call with its container (see cancel_all)
+                await self.current_call.cancel.aio(terminate_containers=True)
+            else:
+                await self._stop_call(job)
             raise RuntimeError("interrupted before start")
         self._status(job, "queued", f"Sent to Modal ({job.gpu}). Waiting for a GPU...")
 

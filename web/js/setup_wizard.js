@@ -276,33 +276,79 @@ export async function openSetup({ gpu, scaledownS, onDone } = {}) {
 
 const ICON = { ok: ["✓", "mb-ok"], warn: ["!", "mb-warn"], fail: ["✗", "mb-fail"] };
 
+// Stop paying now (#22): cancels cloud jobs and downloads, then switches off this app's containers.
+export async function stopNow() {
+  const r = await call("/modal_bridge/stop_now", {});
+  if (!r.jobs && !r.downloads && !r.containers) return "Nothing was running in the cloud.";
+  const parts = [];
+  if (r.jobs) parts.push(`${r.jobs} cloud job(s) cancelled`);
+  if (r.downloads) parts.push(`${r.downloads} cloud download(s) stopped`);
+  if (r.containers) parts.push(`${r.containers} cloud container(s) switched off`);
+  const text = parts.join(", ");
+  return text[0].toUpperCase() + text.slice(1) + ".";
+}
+
 export async function openHealth({ onFix } = {}) {
   const d = dialog("Modal Cloud: check setup");
-  d.body.append(h("p", { class: "mb-muted" }, "Checking..."));
-  let health;
-  try {
-    health = await call("/modal_bridge/health");
-  } catch (e) {
-    d.body.replaceChildren(h("p", { class: "mb-fail" }, e.message));
-    return;
+  let stopped = null; // the result of Stop now, shown above the refreshed checks
+
+  // Two clicks, since it cancels running jobs.
+  function stopButton() {
+    let armed = false;
+    const btn = h("button", { class: "mb-btn secondary", title: "Switch off every cloud GPU of this app now and cancel running cloud jobs" }, "Stop now");
+    btn.addEventListener("click", async () => {
+      if (!armed) {
+        armed = true;
+        btn.className = "mb-btn";
+        btn.textContent = "Really stop? Cancels running jobs";
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "Stopping...";
+      try {
+        stopped = { ok: true, text: await stopNow() };
+      } catch (e) {
+        stopped = { ok: false, text: e.message };
+      }
+      await load();
+    });
+    return btn;
   }
-  const rows = health.checks.map((c) => {
-    const [icon, cls] = ICON[c.status] || ICON.warn;
-    const fix = c.action && h("button", { class: "mb-btn secondary", onclick: () => { d.close(); onFix?.(c.action); } },
-      c.action === "login" ? "Sign in" : "Deploy");
-    return h("div", { class: "mb-check" }, h("span", { class: cls }, icon),
-      h("div", {}, h("div", {}, c.label), h("div", { class: "mb-muted" }, c.detail)), fix || h("span"));
-  });
-  const sp = health.spend || {};
-  const spend = h("div", { class: "mb-step" }, h("h3", {}, "Spending"),
-    sp.month_text != null
-      ? h("p", {}, `Modal billing for this app: ${sp.today_text} today, ${sp.month_text} this month (UTC). Modal's figures can lag about an hour.`)
-      : h("p", { class: "mb-muted" }, "Modal's billing report isn't available right now."),
-    h("p", { class: "mb-muted" },
-      `Estimated GPU cost of ${sp.estimated?.runs ?? 0} cloud run(s) from this computer, including the time the GPU stays on ` +
-      `after each run: ${sp.estimated_text ?? "$0.00"}. Modal's figures above are the real ones.`),
-    h("p", { class: "mb-muted" }, h("a", { href: BUDGETS_URL, target: "_blank", rel: "noopener" }, "Set a spending limit in Modal")));
-  d.body.replaceChildren(h("div", { class: "mb-step" }, ...rows), spend);
+
+  async function load() {
+    d.body.replaceChildren(h("p", { class: "mb-muted" }, "Checking..."));
+    let health;
+    try {
+      health = await call("/modal_bridge/health");
+    } catch (e) {
+      d.body.replaceChildren(h("p", { class: "mb-fail" }, e.message));
+      return;
+    }
+    const rows = health.checks.map((c) => {
+      const [icon, cls] = ICON[c.status] || ICON.warn;
+      const fix = c.action === "stop" ? stopButton()
+        : c.action && h("button", { class: "mb-btn secondary", onclick: () => { d.close(); onFix?.(c.action); } },
+          c.action === "login" ? "Sign in" : "Deploy");
+      return h("div", { class: "mb-check" }, h("span", { class: cls }, icon),
+        h("div", {}, h("div", {}, c.label), h("div", { class: "mb-muted" }, c.detail)), fix || h("span"));
+    });
+    const sp = health.spend || {};
+    const spend = h("div", { class: "mb-step" }, h("h3", {}, "Spending"),
+      sp.month_text != null
+        ? h("p", {}, `Modal billing for this app: ${sp.today_text} today, ${sp.month_text} this month (UTC). Modal's figures can lag about an hour.`)
+        : h("p", { class: "mb-muted" }, "Modal's billing report isn't available right now."),
+      h("p", { class: "mb-muted" },
+        `Estimated GPU cost of ${sp.estimated?.runs ?? 0} cloud run(s) from this computer, including the time the GPU stays on ` +
+        `after each run: ${sp.estimated_text ?? "$0.00"}. Modal's figures above are the real ones.`),
+      h("div", { class: "mb-row" },
+        stopButton(),
+        h("span", { class: "mb-muted" }, "Stop paying now: switches off every cloud GPU of this app at once.")),
+      h("p", { class: "mb-muted" }, h("a", { href: BUDGETS_URL, target: "_blank", rel: "noopener" }, "Set a spending limit in Modal")));
+    const notice = stopped && h("div", { class: "mb-step" }, h("p", { class: stopped.ok ? "mb-ok" : "mb-fail" }, stopped.text));
+    d.body.replaceChildren(...[notice, h("div", { class: "mb-step" }, ...rows), spend].filter(Boolean));
+  }
+
+  await load();
 }
 
 // -- cloud models (spec §6.5, #21) -----------------------------------------------------------

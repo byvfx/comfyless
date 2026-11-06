@@ -14,7 +14,7 @@ You pay Modal directly, by the second, only while a cloud GPU is on. Measured wi
 - **Starting a GPU** after a break takes 30 to 45 seconds.
 - **After a run, the GPU stays on** for a few minutes (5 by default, adjustable) so your next run starts instantly. That idle time is billed too and is usually most of the cost of a single image: one image on its own costs about 20 cents with the 5-minute default, or about 7 cents with 1 minute. Ten images in a row cost about a cent each.
 
-Modal's free plan includes monthly credit. Set a spending limit in the Modal dashboard ([how](https://modal.com/docs/guide/budgets)). *Extensions → Modal Cloud → Check setup and spending* shows what Modal billed you today and this month.
+Modal's free plan includes monthly credit. Set a spending limit in the Modal dashboard ([how](https://modal.com/docs/guide/budgets)). *Extensions → Modal Cloud → Check setup and spending* shows what Modal billed you today and this month, and whether any cloud GPU is on right now. **Stop now** there (or *Extensions → Modal Cloud → Stop cloud GPUs now*) switches them all off at once.
 
 ## Install
 

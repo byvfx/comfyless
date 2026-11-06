@@ -19,6 +19,7 @@ import execution
 from aiohttp import web
 from server import PromptServer
 
+from ..backend import app as backend
 from . import config, errors
 from . import inputs as inputs_mod
 from .cloud_nodes import cloud_nodes
@@ -33,12 +34,14 @@ log = logging.getLogger("modal-bridge")
 GPUS = ("L40S", "A100-80GB", "H100")
 DEFAULT_GPU = "L40S"
 DEFAULT_SCALEDOWN_S = 300
+MODAL_APPS_URL = "https://modal.com/apps"
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 _runner: CloudRunner | None = None
 _setup: Setup | None = None
 _models: ModelManager | None = None
+_stopping = False  # Stop now is cancelling work and stopping containers; nothing new may start
 
 
 def _bad_request(error_type: str, message: str, details: str = "", node_errors: dict | None = None,
@@ -83,6 +86,8 @@ def _busy(*kinds: str) -> str | None:
         return "Switching to your new Modal account once running cloud work finishes. Try again in a moment."
     if "models" in kinds and _models.active:
         return "Wait for the model uploads and downloads to finish first."
+    if "stopping" in kinds and _stopping:
+        return "Switching off the cloud GPUs (Stop now). Try again in a moment."
     return None
 
 
@@ -119,7 +124,7 @@ def setup() -> None:
     server = PromptServer.instance
     routes = server.routes
     _runner = CloudRunner(get_client())
-    _setup = Setup(_connect, lambda: _busy("jobs", "test", "deploy", "models"))
+    _setup = Setup(_connect, lambda: _busy("jobs", "test", "deploy", "models", "stopping"))
     _models = ModelManager(_sync_models)
     server.loop.create_task(_connect())
 
@@ -176,7 +181,7 @@ def setup() -> None:
 
         input_files = await asyncio.to_thread(inputs_mod.collect, prompt, model_refs)
         extra = json_data.get("extra_data") or {}
-        if reason := _busy("login", "deploy"):
+        if reason := _busy("login", "deploy", "stopping"):
             return _bad_request("modal_busy", "Modal Cloud setup is in progress", reason)
         _runner.submit(
             CloudJob(
@@ -255,7 +260,7 @@ def setup() -> None:
     async def post_deploy(request: web.Request):
         if (denied := _local_only(request)) is not None:
             return denied
-        if _setup.deploy["state"] != "running" and (reason := _busy("jobs", "test", "login", "models")):
+        if _setup.deploy["state"] != "running" and (reason := _busy("jobs", "test", "login", "models", "stopping")):
             return web.json_response({"error": reason}, status=409)
         # "recreate" stops warm GPUs so the next job runs the new code; no job is running now.
         _setup.start_deploy(recreate=True)
@@ -268,7 +273,7 @@ def setup() -> None:
         body = await _json_body(request)
         gpu = body.get("gpu") if body.get("gpu") in GPUS else DEFAULT_GPU
         scaledown_s = int(min(max(float(body.get("scaledown_s") or DEFAULT_SCALEDOWN_S), 60), 1200))
-        if reason := _busy("login", "deploy"):
+        if reason := _busy("login", "deploy", "stopping"):
             return web.json_response({"error": reason}, status=409)
         try:
             return web.json_response(await _setup.run_test(gpu, scaledown_s))
@@ -288,6 +293,37 @@ def setup() -> None:
         if (denied := _local_only(request, mutating=False)) is not None:
             return denied
         return web.json_response(await _setup.health())
+
+    @routes.post("/modal_bridge/stop_now")
+    async def post_stop_now(request: web.Request):
+        """Stop paying now (spec §7.5, #22): cancel cloud jobs and downloads, then stop this app's containers.
+
+        Containers are stopped only after every call that could still hold an input is cancelled:
+        Modal reschedules an input whose container is stopped. Nothing new may start meanwhile.
+        """
+        global _stopping
+        if (denied := _local_only(request)) is not None:
+            return denied
+        # A setup test's call isn't tracked by the runner, so it can't be cancelled first.
+        if reason := _busy("login", "deploy", "test", "stopping"):
+            return web.json_response({"error": reason}, status=409)
+        _stopping = True
+        jobs = downloads = 0
+        try:
+            jobs = await _runner.cancel_all()
+            downloads = await _models.cancel_downloads()
+            stopped = await get_client().stop_containers()
+        except Exception as exc:
+            log.warning("[modal-bridge] stop now failed: %s", exc)
+            return web.json_response({
+                "error": f"Couldn't switch everything off from here ({errors.friendly(exc)}). "
+                         f"Stop {backend.APP_NAME} on Modal's Apps page: {MODAL_APPS_URL}",
+                "jobs": jobs, "downloads": downloads,
+            }, status=502)
+        finally:
+            _stopping = False
+        log.info("[modal-bridge] stop now: %d job(s), %d download(s) cancelled, %d container(s) stopped", jobs, downloads, stopped)
+        return web.json_response({"jobs": jobs, "downloads": downloads, "containers": stopped})
 
     # -- cloud model manager (spec §6.5, #21) ---------------------------------------------------
 
@@ -316,12 +352,12 @@ def setup() -> None:
     async def post_model_download(request: web.Request):
         return await _models_action(
             request, lambda b: _models.start_download(b.get("url", ""), b.get("folder", ""), b.get("filename", "")),
-            "login", "deploy")
+            "login", "deploy", "stopping")
 
     @routes.post("/modal_bridge/models/upload")
     async def post_model_upload(request: web.Request):
         return await _models_action(
-            request, lambda b: _models.start_upload(b.get("folder", ""), b.get("name", "")), "login", "deploy")
+            request, lambda b: _models.start_upload(b.get("folder", ""), b.get("name", "")), "login", "deploy", "stopping")
 
     @routes.post("/modal_bridge/models/cancel")
     async def post_model_cancel(request: web.Request):

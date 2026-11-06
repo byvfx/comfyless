@@ -3,7 +3,7 @@
 // response, so the frontend's own queueing, error display and progress tracking keep working.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { openHealth, openMissingModels, openModels, openSetup } from "./setup_wizard.js";
+import { openHealth, openMissingModels, openModels, openSetup, stopNow } from "./setup_wizard.js";
 
 const EXT = "ModalBridge";
 const SETTING = {
@@ -62,6 +62,16 @@ function showSetup() {
 
 function showModels() {
   openModels({ onChanged: () => app.refreshComboInNodes?.() });
+}
+
+async function stopCloud() {
+  try {
+    const s = await (await api.fetchApi("/modal_bridge/status")).json();
+    if ((s.running || s.pending) && !window.confirm("Stop all cloud GPUs now? This cancels your running and queued cloud jobs.")) return;
+    toast("success", "Cloud GPUs stopped", await stopNow(), 6000);
+  } catch (e) {
+    toast("error", "Couldn't stop cloud GPUs", e.message, 12000);
+  }
 }
 
 function showHealth() {
@@ -242,6 +252,7 @@ app.registerExtension({
     { id: "ModalBridge.Setup", label: "Setup (sign in, deploy, test)", icon: "pi pi-cog", function: showSetup },
     { id: "ModalBridge.Health", label: "Check setup and spending", icon: "pi pi-heart", function: showHealth },
     { id: "ModalBridge.Models", label: "Cloud models", icon: "pi pi-database", function: showModels },
+    { id: "ModalBridge.StopNow", label: "Stop cloud GPUs now", icon: "pi pi-power-off", function: stopCloud },
     {
       id: "ModalBridge.SyncModels",
       label: "Refresh cloud model list",
@@ -258,7 +269,7 @@ app.registerExtension({
   menuCommands: [
     {
       path: ["Extensions", "Modal Cloud"],
-      commands: ["ModalBridge.Toggle", "ModalBridge.Setup", "ModalBridge.Health", "ModalBridge.Models", "ModalBridge.SyncModels"],
+      commands: ["ModalBridge.Toggle", "ModalBridge.Setup", "ModalBridge.Health", "ModalBridge.Models", "ModalBridge.SyncModels", "ModalBridge.StopNow"],
     },
   ],
   actionBarButtons: [toggleButton],

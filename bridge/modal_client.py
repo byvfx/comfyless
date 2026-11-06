@@ -103,6 +103,51 @@ class ModalClient:
         with open(local_path, "wb") as fh:
             self.io_vol.read_file_into_fileobj(remote_path, fh)
 
+    # -- running containers ("stop paying now", #22) ---------------------------------------------
+    # The SDK has no public call for these; `modal container list` / `modal container stop` use the
+    # same two requests. Only containers of this app are ever listed or stopped.
+
+    async def app_containers(self) -> list[str]:
+        """Ids of this app's containers that are running now (GPU workers, downloads)."""
+        app = await modal.App.lookup.aio(backend.APP_NAME)
+        return await asyncio.to_thread(_list_tasks, app.app_id)
+
+    async def stop_containers(self) -> int:
+        """Stop every running container of this app. Returns how many were stopped."""
+        ids = await self.app_containers()
+        for task_id in ids:
+            await asyncio.to_thread(_stop_task, task_id)
+        return len(ids)
+
+
+def _list_tasks(app_id: str) -> list[str]:
+    from modal._object import _get_environment_name
+    from modal._utils.async_utils import synchronizer
+    from modal.client import _Client
+    from modal_proto import api_pb2
+
+    @synchronizer.create_blocking
+    async def run() -> list[str]:
+        client = await _Client.from_env()
+        request = api_pb2.TaskListRequest(environment_name=_get_environment_name(None) or "", app_id=app_id)
+        res = await client._stub.TaskList(request)
+        return [t.task_id for t in res.tasks if t.app_id == app_id]  # never another app's containers
+
+    return run()
+
+
+def _stop_task(task_id: str) -> None:
+    from modal._utils.async_utils import synchronizer
+    from modal.client import _Client
+    from modal_proto import api_pb2
+
+    @synchronizer.create_blocking
+    async def run() -> None:
+        client = await _Client.from_env()
+        await client._stub.ContainerStop(api_pb2.ContainerStopRequest(task_id=task_id))
+
+    run()
+
 
 _client: ModalClient | None = None
 
