@@ -1,0 +1,114 @@
+"""Thin async wrapper over the Modal SDK objects the bridge uses (spec §5.4).
+
+Uses the Modal token from the user's ~/.modal.toml. Lookups are cached for the life of the
+ComfyUI process; the first Modal call in a process costs seconds, so `warm_up()` runs at startup.
+After sign-in or a deploy, `reset_client()` drops the cached handles (in place, so holders of the
+client keep a working object).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import queue
+from typing import Any
+
+import modal
+
+from ..backend import app as backend
+from . import errors
+
+log = logging.getLogger("modal-bridge")
+
+
+class ModalClient:
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.models_vol = modal.Volume.from_name(backend.MODELS_VOLUME)
+        self.io_vol = modal.Volume.from_name(backend.IO_VOLUME)
+        self.events = modal.Queue.from_name(backend.EVENTS_QUEUE, create_if_missing=True)
+        self._worker_cls = modal.Cls.from_name(backend.APP_NAME, "ComfyWorker")
+        self._variants: dict[tuple[str, int], Any] = {}
+        self.ready = False
+        self.error: str | None = None
+        self._exc: BaseException | None = None
+
+    async def warm_up(self) -> None:
+        """Resolve the deployed app, queue and volumes so the first job doesn't pay for it."""
+        try:
+            await asyncio.gather(
+                self._worker_cls.hydrate.aio(),
+                self.events.hydrate.aio(),
+                self.models_vol.hydrate.aio(),
+                self.io_vol.hydrate.aio(),
+            )
+            self.ready = True
+            self.error = None
+            self._exc = None
+            log.info("[modal-bridge] connected to Modal app %s", backend.APP_NAME)
+        except Exception as exc:
+            self.ready = False
+            self._exc = exc
+            self.error = f"{type(exc).__name__}: {exc}"
+            log.warning("[modal-bridge] could not reach Modal app %s: %s", backend.APP_NAME, self.error)
+
+    @property
+    def error_text(self) -> str | None:
+        """Why the bridge isn't connected, in plain language with a next step."""
+        if self.ready:
+            return None
+        return errors.friendly(self._exc) if self._exc else "Still connecting to Modal..."
+
+    def worker(self, gpu: str, scaledown_s: int):
+        """A ComfyWorker instance for the requested GPU and idle window (cached per combination)."""
+        key = (gpu, scaledown_s)
+        if key not in self._variants:
+            cls = self._worker_cls.with_options(gpu=gpu, scaledown_window=scaledown_s)
+            self._variants[key] = cls()
+        return self._variants[key]
+
+    async def next_events(self, job_id: str, timeout: float) -> list[dict]:
+        try:
+            return await self.events.get_many.aio(100, timeout=timeout, partition=job_id)
+        except queue.Empty:
+            return []
+
+    async def list_models(self) -> list[str]:
+        """Relative paths of every file in the models volume, e.g. "checkpoints/x.safetensors"."""
+        entries = await self.models_vol.listdir.aio("/", recursive=True)
+        return [e.path for e in entries if e.type == modal.volume.FileEntryType.FILE]
+
+    async def existing_inputs(self) -> set[str]:
+        try:
+            entries = await self.io_vol.listdir.aio("inputs")
+        except modal.exception.NotFoundError:
+            return set()
+        return {e.path.rsplit("/", 1)[-1] for e in entries}
+
+    def upload_inputs_blocking(self, files: list[tuple[str, str]]) -> None:
+        """Upload (local_path, remote_path) pairs. Blocking; call via asyncio.to_thread."""
+        with self.io_vol.batch_upload() as batch:
+            for local, remote in files:
+                batch.put_file(local, remote)
+
+    def download_blocking(self, remote_path: str, local_path: str) -> None:
+        with open(local_path, "wb") as fh:
+            self.io_vol.read_file_into_fileobj(remote_path, fh)
+
+
+_client: ModalClient | None = None
+
+
+def get_client() -> ModalClient:
+    global _client
+    if _client is None:
+        _client = ModalClient()
+    return _client
+
+
+def reset_client() -> ModalClient:
+    client = get_client()
+    client.reset()
+    return client

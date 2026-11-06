@@ -1,0 +1,31 @@
+# Publishes to the Comfy Registry (so ComfyUI-Manager can install it) when the version in
+# pyproject.toml changes. Lives in the byvfx/comfyless mirror; inert in byvfx/comfy-serverless.
+# Needs the repository secret REGISTRY_ACCESS_TOKEN (an API key from registry.comfy.org).
+# Every publish needs a new version: the Registry never replaces a published one.
+name: Publish to Comfy Registry
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["pyproject.toml"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.repository == 'byvfx/comfyless'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for the Registry key
+        env:
+          TOKEN: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Add the REGISTRY_ACCESS_TOKEN repository secret (an API key from registry.comfy.org) to publish."
+            exit 1
+          fi
+      - uses: Comfy-Org/publish-node-action@7578cdb0c1410f2515e6f9b1443c6859cab94f05 # 1.0.1; checks out the repo itself
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
