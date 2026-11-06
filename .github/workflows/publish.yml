@@ -26,6 +26,18 @@ jobs:
             echo "::error::Add the REGISTRY_ACCESS_TOKEN repository secret (an API key from registry.comfy.org) to publish."
             exit 1
           fi
-      - uses: Comfy-Org/publish-node-action@7578cdb0c1410f2515e6f9b1443c6859cab94f05 # 1.0.1; checks out the repo itself
+      # What Comfy-Org/publish-node-action does, with comfy-cli pinned: the action installs the
+      # latest comfy-cli, whose options change (1.25.0 dropped the --yes the action passes).
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+          python-version: "3.12"
+      - name: Install comfy-cli
+        run: pip install "comfy-cli==1.25.0"
+      - name: Validate and publish
+        env:
+          TOKEN: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+        run: |
+          comfy --skip-prompt tracking disable
+          comfy --skip-prompt node validate
+          comfy --skip-prompt node publish --token "$TOKEN"
