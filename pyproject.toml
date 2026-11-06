@@ -2,10 +2,11 @@
 name = "comfyless"
 description = "Run ComfyUI workflows on cloud GPUs in your own Modal account, straight from your local ComfyUI. Sign in, deploy and run without a terminal."
 version = "0.3.3"
-license = { file = "LICENSE" }
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["modal>=1.6.3,<2"]
-classifiers = ["Operating System :: OS Independent", "License :: OSI Approved :: GNU General Public License v3 (GPLv3)"]
+classifiers = ["Operating System :: OS Independent"]
 
 [project.urls]
 Repository = "https://github.com/byvfx/comfyless"
@@ -15,4 +16,5 @@ Documentation = "https://github.com/byvfx/comfyless#readme"
 [tool.comfy]
 PublisherId = "byvfx"
 DisplayName = "Comfyless: run ComfyUI on cloud GPUs"
+Icon = "https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/icon.png"
 includes = []

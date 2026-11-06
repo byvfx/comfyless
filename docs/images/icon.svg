@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <rect width="400" height="400" rx="88" fill="#f6eedd"/>
+  <!-- cord, from the cloud down to the plug -->
+  <path d="M200 236 C 200 300, 110 270, 120 330 C 126 362, 200 360, 230 344"
+        fill="none" stroke="#1f1d2b" stroke-width="12" stroke-linecap="round"/>
+  <!-- plug -->
+  <g transform="translate(228 322) rotate(-28)">
+    <rect x="0" y="0" width="56" height="44" rx="10" fill="#ef4b3c" stroke="#1f1d2b" stroke-width="8"/>
+    <rect x="52" y="8" width="26" height="8" rx="3" fill="#1f1d2b"/>
+    <rect x="52" y="28" width="26" height="8" rx="3" fill="#1f1d2b"/>
+  </g>
+  <!-- bold cloud -->
+  <path d="M110 238 Q60 238 62 194 Q64 152 110 152 Q118 86 186 80 Q246 76 270 124 Q332 116 342 176 Q350 238 290 238 Z"
+        fill="#ef4b3c" stroke="#1f1d2b" stroke-width="12" stroke-linejoin="round"/>
+  <!-- sleepy-happy face: it's comfy -->
+  <path d="M168 182 Q180 194 192 182" fill="none" stroke="#1f1d2b" stroke-width="8" stroke-linecap="round"/>
+  <path d="M232 182 Q244 194 256 182" fill="none" stroke="#1f1d2b" stroke-width="8" stroke-linecap="round"/>
+  <path d="M198 206 Q212 218 226 206" fill="none" stroke="#1f1d2b" stroke-width="8" stroke-linecap="round"/>
+</svg>
