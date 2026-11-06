@@ -248,7 +248,7 @@ export async function openSetup({ gpu, scaledownS, onDone } = {}) {
     const t = ui.test;
     d.body.append(step(4, !!t, "Run a test",
       h("p", { class: "mb-muted" },
-        `Starts a ${gpu || "L40S"} GPU and runs a tiny workflow. About a minute the first time; costs about a cent.`),
+        `Starts an ${gpu || "L40S"} GPU and runs a tiny workflow. About a minute the first time; costs about a cent.`),
       h("div", { class: "mb-row" },
         h("button", { class: t ? "mb-btn secondary" : "mb-btn", disabled: !deployed || running || ui.busy.test,
           onclick: () => act("test", async () => (ui.test = await call("/modal_bridge/setup/test", { gpu, scaledown_s: scaledownS }))) },
