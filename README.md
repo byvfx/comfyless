@@ -35,7 +35,13 @@ Modal's free plan includes monthly credit. Set a spending limit in the Modal das
 - **Extensions → Modal Cloud:** setup, check setup and spending, refresh the cloud model list.
 - **After updating Comfyless**, open Setup and click **Deploy again**.
 
-Limitations for now: only ComfyUI's built-in nodes run in the cloud (custom node packs are coming), and cloud jobs don't appear in the queue panel.
+- **Custom nodes:** your packs in `custom_nodes/` are mirrored to the cloud when you deploy.
+  - Packs from the Comfy Registry or git are installed at the same version; others are uploaded from your computer.
+  - Packs that don't install in the cloud are listed in the deploy log and in *Check setup*.
+  - A workflow that needs one of them is stopped before it runs, with the node highlighted.
+  - Deploy again after adding or updating packs.
+
+Limitations for now: cloud jobs don't appear in the queue panel, and packs that need system software the cloud doesn't have may not install.
 
 ## Privacy and security
 

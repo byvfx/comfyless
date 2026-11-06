@@ -20,6 +20,7 @@ from server import PromptServer
 
 from . import config, errors
 from . import inputs as inputs_mod
+from .cloud_nodes import cloud_nodes
 from .modal_client import get_client
 from .models_sync import cloud_models
 from .runner import CloudJob, CloudRunner
@@ -100,6 +101,10 @@ async def _connect() -> None:
             await _setup.rates()
         except Exception:
             pass
+        try:
+            await cloud_nodes.refresh()
+        except Exception as exc:
+            log.warning("[modal-bridge] couldn't read the cloud's node list: %s", exc)
     PromptServer.instance.send_sync("modal_bridge.connection", {"connected": client.ready, "error": client.error_text})
 
 
@@ -135,6 +140,15 @@ def setup() -> None:
         valid = await execution.validate_prompt(prompt_id, prompt, partial)
         if not valid[0]:
             return web.json_response({"error": valid[1], "node_errors": valid[3]}, status=400)
+
+        await cloud_nodes.refresh_if_stale()
+        if unavailable := cloud_nodes.check(prompt):
+            return _bad_request(
+                "prompt_outputs_failed_validation",
+                "Some nodes aren't available in the cloud",
+                "Mirror your custom nodes with Deploy in Extensions > Modal Cloud > Check setup, or run this workflow locally.",
+                unavailable,
+            )
 
         missing, model_refs = cloud_models.check_and_rewrite(prompt)
         if missing:

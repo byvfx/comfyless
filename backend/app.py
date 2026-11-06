@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import os
 import shutil
 import subprocess
 import sys
@@ -24,9 +25,43 @@ import modal
 APP_NAME = "comfy-modal-bridge"
 SCHEMA_VERSION = 1
 
-# Must match the user's local ComfyUI (spec §6.7). Desktop installs core separately from the app
-# and currently pulls the latest release. M4 replaces this with the version read from the local install.
-COMFYUI_VERSION = "v0.44.0"
+
+def _load_nodes_manifest() -> dict:
+    """What to mirror from the user's computer (spec §6.7): ComfyUI's version and custom node packs.
+
+    The bridge writes it (bridge/nodes_manifest.py) and passes its path to deploy.py. It is read only
+    on the deploying machine. In the container the image is already built, so the definition below
+    falls back to plain ComfyUI there, and code that runs in the container reads what was built
+    from BUILD_DIR instead.
+    """
+    path = os.environ.get("COMFYLESS_NODES_MANIFEST")
+    if not path or not modal.is_local():
+        return {}
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+NODES_MANIFEST = _load_nodes_manifest()
+
+# The cloud runs the user's local ComfyUI release when it is at least the oldest one this backend is
+# tested with; otherwise this default. Desktop installs ComfyUI releases, so the tag exists.
+DEFAULT_COMFYUI_VERSION = "v0.44.0"
+MIN_COMFYUI_VERSION = (0, 44, 0)
+
+
+def _version_tuple(tag: str | None) -> tuple[int, ...] | None:
+    try:
+        return tuple(int(x) for x in (tag or "").lstrip("v").split("."))
+    except ValueError:
+        return None
+
+
+def _comfyui_version(manifest: dict) -> str:
+    tag = manifest.get("comfyui_version")
+    parsed = _version_tuple(tag)
+    return tag if parsed and parsed >= MIN_COMFYUI_VERSION else DEFAULT_COMFYUI_VERSION
+
+
+COMFYUI_VERSION = _comfyui_version(NODES_MANIFEST)  # on the deploying machine; the container reads its own
 
 DEFAULT_GPU = "L40S"
 JOB_TIMEOUT_S = 60 * 60
@@ -47,6 +82,10 @@ IO_MOUNT = "/io"
 COMFY_ROOT = "/opt/ComfyUI"
 COMFY_DIR = Path(COMFY_ROOT)
 COMFY_HOST = "127.0.0.1:8188"
+BUILD_DIR = "/opt/comfyless"  # in the image: pip constraints, per-pack build reports, manifest hash
+
+# Not uploaded with packs copied from the user's computer ("local" source).
+LOCAL_PACK_IGNORE = ["**/.git", "**/__pycache__", "**/*.pyc", "**/.venv", "**/venv", "**/node_modules"]
 
 # ComfyUI websocket events relayed to the local UI (spec §5.3).
 FORWARDED_EVENTS = {
@@ -82,6 +121,99 @@ models_vol = modal.Volume.from_name(MODELS_VOLUME, create_if_missing=True)
 io_vol = modal.Volume.from_name(IO_VOLUME, create_if_missing=True)
 bridge_secret = modal.Secret.from_name(SECRET_NAME)
 
+def _install_pack(pack: dict) -> None:
+    """Image build step for one custom node pack (spec §5.1).
+
+    Never raises: a failure is written to the pack's build report and the next pack still installs.
+    Requirements are installed with torch pinned to ComfyUI's build, so a pack can't swap it out.
+    """
+    import io
+    import json
+    import subprocess
+    import sys
+    import urllib.parse
+    import urllib.request
+    import zipfile
+    from pathlib import Path
+
+    name = pack["name"]  # ComfyUI's module name: custom_nodes.<name>
+    dest = Path(COMFY_ROOT) / "custom_nodes" / (pack.get("filename") or name)
+    report = {"name": name, "source": pack["source"], "status": "ok", "step": None, "error": None, "warnings": []}
+
+    def run(step: str, cmd: list[str], timeout: int = 1200) -> None:
+        r = subprocess.run(cmd, cwd=dest if dest.is_dir() else None, capture_output=True, text=True, timeout=timeout)
+        out = (r.stdout or "") + (r.stderr or "")
+        if r.returncode:
+            tail = " ".join(line.strip() for line in out.strip().splitlines()[-6:])
+            raise RuntimeError(f"{step} failed (exit {r.returncode}): {tail[-800:]}")
+
+    step = "download"
+    try:
+        if pack["source"] == "registry":
+            query = urllib.parse.urlencode({"version": pack["version"]})
+            url = f"https://api.comfy.org/nodes/{urllib.parse.quote(pack['id'])}/install?{query}"
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                download_url = json.load(resp)["downloadUrl"]
+            with urllib.request.urlopen(download_url, timeout=600) as resp:
+                data = resp.read()
+            dest.mkdir(parents=True, exist_ok=True)
+            zipfile.ZipFile(io.BytesIO(data)).extractall(dest)  # extractall drops ".." and absolute paths
+        elif pack["source"] == "git":
+            run(step, ["git", "clone", "--filter=blob:none", "--no-checkout", pack["url"], str(dest)])
+            run(step, ["git", "-C", str(dest), "checkout", "-q", pack["commit"]])
+            if (dest / ".gitmodules").is_file():
+                run(step, ["git", "-C", str(dest), "submodule", "update", "--init", "--recursive"])
+        # "local" packs were copied into place by the previous image step.
+
+        req = dest / "requirements.txt"
+        if dest.is_dir() and req.is_file():
+            step = "requirements"
+            pip = [sys.executable, "-m", "pip", "install", "--no-cache-dir", "-c", f"{BUILD_DIR}/constraints.txt"]
+            try:
+                run(step, [*pip, "-r", str(req)])
+            except RuntimeError as bulk_error:
+                # One unavailable requirement (often Windows-only) shouldn't block the rest: like
+                # ComfyUI-Manager, fall back to one line at a time and report what didn't install.
+                # The pack is partial either way, since the file as a whole didn't install.
+                report["status"] = "partial"
+                report["warnings"].append(f"requirements.txt as a whole: {bulk_error}")
+                for line in req.read_text(encoding="utf-8", errors="replace").splitlines():
+                    line = line.split("#", 1)[0].strip()
+                    if not line:
+                        continue
+                    if line.startswith("-"):  # -r/-c/--index-url etc. can't be installed on their own
+                        report["warnings"].append(f"{line}: skipped in the line-by-line retry")
+                        continue
+                    try:
+                        run(step, [*pip, line])
+                    except RuntimeError as exc:
+                        report["warnings"].append(f"{line}: {exc}")
+        if dest.is_dir() and (dest / "install.py").is_file():
+            step = "install.py"
+            run(step, [sys.executable, "install.py"])
+    except Exception as exc:
+        report.update(status="failed", step=step, error=str(exc)[-1500:])
+
+    out = Path(BUILD_DIR) / "build" / f"{name}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report))
+    print(f"[comfyless] custom node {name}: {report['status']}" + (f" at {report['step']}: {report['error']}" if report["error"] else ""))
+
+
+def _with_packs(image: modal.Image, manifest: dict) -> modal.Image:
+    """One cached build step per pack, in a stable order, then the manifest's fingerprint."""
+    for pack in manifest.get("packs", []):
+        dest = f"{COMFY_ROOT}/custom_nodes/{pack.get('filename') or pack['name']}"
+        if pack["source"] == "local":
+            if pack.get("is_file"):
+                image = image.add_local_file(pack["path"], dest, copy=True)
+            else:
+                image = image.add_local_dir(pack["path"], dest, copy=True, ignore=LOCAL_PACK_IGNORE)
+        spec = {k: v for k, v in pack.items() if k != "path"}  # content_hash keeps a local pack's step fresh
+        image = image.run_function(_install_pack, kwargs={"pack": spec}, timeout=30 * 60)
+    return image.run_commands(f"echo {manifest.get('hash') or 'core'} > {BUILD_DIR}/manifest_hash")
+
+
 comfy_image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("git", "libgl1", "libglib2.0-0", "ffmpeg")
@@ -90,9 +222,31 @@ comfy_image = (
         f"pip install --no-cache-dir -r {COMFY_ROOT}/requirements.txt",
     )
     .pip_install("websocket-client", "requests")
+    .run_commands(
+        f"mkdir -p {BUILD_DIR}/build",
+        f"pip freeze | grep -iE '^(torch|torchvision|torchaudio)==' > {BUILD_DIR}/constraints.txt",
+    )
 )
+comfy_image = _with_packs(comfy_image, NODES_MANIFEST)
 
 download_image = modal.Image.debian_slim(python_version="3.12").pip_install("requests")
+
+
+def _built() -> dict:
+    """In the container: what this image was built with."""
+    root = Path(BUILD_DIR)
+    hash_file = root / "manifest_hash"
+    version = None
+    version_file = COMFY_DIR / "comfyui_version.py"
+    if version_file.is_file():
+        for line in version_file.read_text().splitlines():
+            if line.startswith("__version__"):
+                version = "v" + line.split("=", 1)[1].strip().strip("'\"")
+    return {
+        "manifest_hash": hash_file.read_text().strip() if hash_file.is_file() else None,
+        "comfyui_version": version,
+        "packs": [json.loads(p.read_text()) for p in sorted((root / "build").glob("*.json"))],
+    }
 
 
 class _EventSender:
@@ -180,6 +334,10 @@ class ComfyWorker:
         )
         self._wait_healthy()
         self.boot_s = time.time() - self.started_at
+        self.built = _built()
+        import threading
+
+        threading.Thread(target=self._record_nodes, daemon=True).start()
 
     @modal.exit()
     def stop(self) -> None:
@@ -278,7 +436,7 @@ class ComfyWorker:
                 "total_s": t_done - t0,
             },
             "gpu": job.get("gpu") or DEFAULT_GPU,
-            "comfyui_version": COMFYUI_VERSION,
+            "comfyui_version": self.built["comfyui_version"],
         }
 
     def _link_model_dirs(self) -> None:
@@ -294,6 +452,35 @@ class ComfyWorker:
             if target.exists():
                 shutil.rmtree(target)
             target.symlink_to(src, target_is_directory=True)
+
+    def _record_nodes(self) -> None:
+        """Publish which node types this image's ComfyUI loaded, for the bridge's pre-flight check.
+
+        Runs once per container start, off the job path. Keyed by the manifest hash, so the bridge
+        ignores records from containers of an older deploy.
+        """
+        import requests
+
+        try:
+            info = requests.get(f"http://{COMFY_HOST}/object_info", timeout=120).json()
+            pack_classes: dict[str, int] = {}
+            for node in info.values():
+                module = node.get("python_module") or ""
+                if module.startswith("custom_nodes."):
+                    pack = module.split(".", 1)[1]
+                    pack_classes[pack] = pack_classes.get(pack, 0) + 1
+            modal.Dict.from_name(META_DICT, create_if_missing=True).put(
+                "cloud_nodes",
+                {
+                    "manifest_hash": self.built["manifest_hash"],
+                    "comfyui_version": self.built["comfyui_version"],
+                    "classes": sorted(info),
+                    "pack_classes": pack_classes,
+                    "recorded_at": time.time(),
+                },
+            )
+        except Exception as exc:
+            print(f"[modal-bridge] couldn't record cloud nodes: {exc}", file=sys.stderr)
 
     def _wait_healthy(self, timeout_s: float = 300) -> None:
         import requests
@@ -501,3 +688,13 @@ def download_model(url: str, dest: str) -> dict:
     partial.rename(target)
     models_vol.commit()
     return {"path": dest, "size": target.stat().st_size, "seconds": time.time() - t0}
+
+
+@app.function(image=comfy_image, timeout=5 * 60)
+def build_report() -> dict:
+    """What the deployed worker image contains: ComfyUI version and each custom node pack's build result.
+
+    A CPU container on the worker's image, called by deploy.py right after a deploy, so the result
+    shows without waiting for a GPU.
+    """
+    return _built()

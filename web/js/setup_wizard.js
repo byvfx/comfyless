@@ -35,6 +35,7 @@ const CSS = `
 .mb-check:last-child { border-bottom: 0; }
 .mb-test-img { width: 64px; height: 64px; border-radius: 6px; border: 1px solid var(--border-color, #555); }
 .mb-dialog a { color: var(--p-primary-color, #60a5fa); }
+.mb-list { margin: 4px 0 8px; padding-left: 20px; font-size: 13px; }
 `;
 
 // Build DOM without innerHTML, so server text (errors, log lines) is never parsed as HTML.
@@ -83,6 +84,20 @@ function dialog(title, onClose) {
   document.body.append(el);
   el.showModal();
   return { body, close };
+}
+
+// What a deploy mirrors from this computer: ComfyUI's version and each custom node pack's source.
+function nodesList(nodes) {
+  if (!nodes) return null;
+  const packs = nodes.packs || [];
+  return h("div", { class: "mb-muted" },
+    h("p", { class: "mb-muted" }, packs.length
+      ? `Mirrors ComfyUI ${nodes.comfyui_version || ""} and ${packs.length} custom node pack(s) from this computer:`
+      : `Mirrors ComfyUI ${nodes.comfyui_version || ""}. No custom node packs to mirror.`),
+    packs.length ? h("ul", { class: "mb-list" }, packs.map((p) => h("li", {}, `${p.name}: ${p.label}`))) : null,
+    (nodes.skipped || []).length
+      ? h("p", { class: "mb-muted" }, "Not mirrored: " + nodes.skipped.map((s) => `${s.name} (${s.reason})`).join("; "))
+      : null);
 }
 
 function step(num, done, title, ...content) {
@@ -207,7 +222,8 @@ export async function openSetup({ gpu, scaledownS, onDone } = {}) {
     d.body.append(step(3, deployed && !running, "Install the cloud worker",
       h("p", { class: "mb-muted" },
         "Sets up ComfyUI in your Modal account. The first time builds the cloud image and takes about 3 to 6 minutes. " +
-        "Run it again after updating this extension."),
+        "Run it again after updating this extension or adding custom nodes."),
+      nodesList(s.nodes),
       h("div", { class: "mb-row" },
         h("button", { class: deployed ? "mb-btn secondary" : "mb-btn", disabled: !signedIn || running || ui.busy.deploy,
           onclick: () => act("deploy", () => call("/modal_bridge/setup/deploy", {})) },

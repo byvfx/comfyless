@@ -24,12 +24,14 @@ import time
 import uuid
 from pathlib import Path
 
+import folder_paths
 import modal
 import modal.exception as mx
 from server import PromptServer
 
 from ..backend import app as backend
-from . import config, errors, pricing
+from . import config, errors, nodes_manifest, pricing
+from .cloud_nodes import cloud_nodes
 from .modal_client import get_client, reset_client
 
 log = logging.getLogger("modal-bridge")
@@ -63,6 +65,13 @@ def _listening_beyond_this_computer() -> bool:
     return any(h not in ("127.0.0.1", "localhost", "::1") for h in hosts)
 
 
+def _manifest_path() -> Path:
+    return Path(folder_paths.get_user_directory(), "default", "modal_bridge", "nodes_manifest.json")
+
+
+NODES_CACHE_S = 5
+
+
 class Setup:
     def __init__(self, on_connected, cloud_busy) -> None:
         self._on_connected = on_connected  # coroutine fn: reconnect + model sync after login/deploy
@@ -72,6 +81,7 @@ class Setup:
         self._rates: dict[str, float] | None = None
         self.workspace: str | None = None
         self.tests_running = 0
+        self._nodes: tuple[float, dict] | None = None  # (when, summary) of the local custom nodes
 
     @property
     def switching_account(self) -> bool:
@@ -98,7 +108,19 @@ class Setup:
             "secret_keys": cfg["secret_keys"],
             "setup_done": cfg["setup_done"],
             "connected": get_client().ready,
+            "nodes": await self.local_nodes(),
         }
+
+    async def local_nodes(self) -> dict | None:
+        """Summary of the custom nodes a deploy would mirror; rescanned at most every few seconds."""
+        now = time.time()
+        if self._nodes is None or now - self._nodes[0] > NODES_CACHE_S:
+            try:
+                self._nodes = (now, nodes_manifest.summary(await asyncio.to_thread(nodes_manifest.build)))
+            except Exception as exc:
+                log.warning("[modal-bridge] couldn't list custom nodes: %s", exc)
+                return None
+        return self._nodes[1]
 
     # -- sign-in -------------------------------------------------------------------------------
 
@@ -194,7 +216,13 @@ class Setup:
     def _deploy_blocking(self, recreate: bool) -> None:
         cmd = [sys.executable, "-u", str(BACKEND_DIR / "deploy.py")] + (["--recreate"] if recreate else [])
         env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "120"}
-        self._emit_deploy(line="Starting deploy. The first one builds the cloud image and takes a few minutes.")
+        self._emit_deploy(line="Starting deploy. The first one builds the cloud image and takes a few minutes; "
+                               "each custom node pack adds a minute or two the first time.")
+        try:
+            env["COMFYLESS_NODES_MANIFEST"] = str(nodes_manifest.write(nodes_manifest.build(), _manifest_path()))
+        except Exception as exc:
+            log.warning("[modal-bridge] couldn't list custom nodes, deploying plain ComfyUI: %s", exc)
+            self._emit_deploy(line=f"Couldn't list your custom nodes ({exc}); deploying plain ComfyUI.")
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -236,6 +264,33 @@ class Setup:
         self.deploy["error"] = error
         self._emit_deploy(state=self.deploy["state"], error=error)
 
+    async def _nodes_check(self, meta: dict) -> tuple:
+        """(status, detail[, action]) for the custom nodes row of Check setup."""
+        local = await self.local_nodes()
+        if meta.get("packs") is None and meta.get("manifest_hash"):
+            return ("warn", "The last deploy couldn't read its custom node build report. Deploy again.", "deploy")
+        packs = meta.get("packs") or []
+        failed = [p for p in packs if p.get("status") == "failed"]
+        partial = [p for p in packs if p.get("status") == "partial"]
+        record = cloud_nodes.record if cloud_nodes.current else None
+        not_loaded = [p["name"] for p in packs if p.get("status") != "failed" and record is not None
+                      and not record.get("pack_classes", {}).get(p["name"])]
+        if local and local["hash"] != meta.get("manifest_hash"):
+            names = ", ".join(p["name"] for p in local["packs"]) or "none"
+            return ("warn", f"Your custom nodes or ComfyUI version changed since the last deploy. Deploy again to mirror them ({names}).", "deploy")
+        if failed or not_loaded:
+            parts = [f"{p['name']} failed to install ({p.get('step')}): {(p.get('error') or '')[:160]}" for p in failed]
+            parts += [f"{name} installed but didn't load in the cloud" for name in not_loaded]
+            return ("warn", " ".join(parts))
+        if not packs:
+            return ("ok", "No custom node packs to mirror; the cloud runs core ComfyUI nodes.")
+        detail = f"{len(packs)} pack(s) mirrored: {', '.join(p['name'] for p in packs)}."
+        if partial:
+            detail += f" Some requirements of {', '.join(p['name'] for p in partial)} didn't install."
+        if local and local["skipped"]:
+            detail += " Not mirrored: " + "; ".join(f"{s['name']} ({s['reason']})" for s in local["skipped"])
+        return ("ok", detail)
+
     # -- test job ----------------------------------------------------------------------------------
 
     async def run_test(self, gpu: str, scaledown_s: int) -> dict:
@@ -258,7 +313,7 @@ class Setup:
             "workflow": None,
             "inputs": [],
             "gpu": gpu,
-            "client": {"bridge_version": "0.1.0", "comfyui_version": backend.COMFYUI_VERSION},
+            "client": {"bridge_version": "0.2.0", "comfyui_version": backend.COMFYUI_VERSION},
         }
         t0 = time.time()
         result = await client.worker(gpu, scaledown_s).run.remote.aio(payload)
@@ -338,10 +393,11 @@ class Setup:
                 add("deploy", "Cloud backend deployed", "fail", "Not deployed to your Modal account yet.", "deploy")
             except Exception as exc:
                 add("deploy", "Cloud backend deployed", "fail", errors.friendly(exc), "deploy")
+        meta = None
         if deployed:
-            meta = None
             try:
-                meta = await modal.Dict.from_name(backend.META_DICT).get.aio("deployed")
+                await cloud_nodes.refresh()
+                meta = cloud_nodes.deployed
             except Exception:
                 pass
             if not meta:
@@ -353,11 +409,15 @@ class Setup:
                 add("deploy", "Cloud backend deployed", "ok", f"Up to date (deployed {when}).")
 
         local = _local_comfyui_version()
-        cloud = backend.COMFYUI_VERSION.lstrip("v")
+        cloud = ((meta or {}).get("comfyui_version") or backend.COMFYUI_VERSION).lstrip("v")
         if local and local != cloud:
-            add("version", "ComfyUI versions match", "warn", f"This computer runs ComfyUI {local}, the cloud runs {cloud}. Most workflows still work; nodes new in {local} may not.")
+            add("version", "ComfyUI versions match", "warn", f"This computer runs ComfyUI {local}, the cloud runs {cloud}. Most workflows still work; nodes new in {local} may not. "
+                f"Deploy again to match it (the cloud supports {backend.DEFAULT_COMFYUI_VERSION} and newer).", "deploy")
         else:
             add("version", "ComfyUI versions match", "ok", f"ComfyUI {cloud}")
+
+        if deployed and meta:
+            add("nodes", "Custom nodes in the cloud", *await self._nodes_check(meta))
 
         if deployed:
             try:
