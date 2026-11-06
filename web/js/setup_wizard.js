@@ -322,6 +322,22 @@ const LIST_LIMIT = 300;
 // replaceChildren() would add "null" as text for the optional parts.
 const fill = (el, ...children) => el.replaceChildren(...children.flat().filter((c) => c != null && c !== false && c !== ""));
 
+// A transfer's status text and, while it runs, its progress bar.
+function transferView(t) {
+  const known = t.total > 0;
+  const pct = known ? Math.min(100, (100 * t.done) / t.total) : 0;
+  const active = ACTIVE.includes(t.state);
+  const finishing = t.state === "running" && known && t.done >= t.total; // sent; Modal is saving it
+  const status = t.state === "error" ? h("span", { class: "mb-fail" }, t.error)
+    : finishing ? h("span", { class: "mb-muted" }, "Finishing...")
+    : t.state === "running" ? h("span", { class: "mb-size" }, known ? `${formatBytes(t.done)} of ${formatBytes(t.total)}` : formatBytes(t.done))
+    : h("span", { class: t.state === "done" ? "mb-ok" : "mb-muted" }, STATE_TEXT[t.state] ?? t.state);
+  const bar = active
+    ? h("div", { class: `mb-bar${known && t.state === "running" && !finishing ? "" : " indeterminate"}` }, h("div", { style: `width: ${pct}%` }))
+    : null;
+  return { status, bar, active };
+}
+
 let modelsOpen = null;
 
 export async function openModels({ onChanged } = {}) {
@@ -420,21 +436,14 @@ export async function openModels({ onChanged } = {}) {
     const ts = ui.list?.transfers || [];
     fill(transfersBox, ts.length ? h("div", { class: "mb-step" }, h("h3", {}, "Transfers"),
       ts.slice().reverse().map((t) => {
-        const known = t.total > 0;
-        const pct = known ? Math.min(100, (100 * t.done) / t.total) : 0;
-        const active = ACTIVE.includes(t.state);
-        const finishing = t.state === "running" && known && t.done >= t.total; // sent; Modal is saving it
-        const status = t.state === "error" ? h("span", { class: "mb-fail" }, t.error)
-          : finishing ? h("span", { class: "mb-muted" }, "Finishing...")
-          : t.state === "running" ? h("span", { class: "mb-size" }, known ? `${formatBytes(t.done)} of ${formatBytes(t.total)}` : formatBytes(t.done))
-          : h("span", { class: t.state === "done" ? "mb-ok" : "mb-muted" }, STATE_TEXT[t.state] ?? t.state);
+        const { status, bar, active } = transferView(t);
         return h("div", { class: "mb-item" },
           h("span", { class: "mb-name" }, `${t.kind === "upload" ? "↑" : "↓"} ${t.folder}/${t.name}`),
           status,
           t.kind === "download" && active && t.state !== "cancelling"
             ? h("button", { class: "mb-btn secondary", onclick: () => act(`cancel-${t.id}`, () => call("/modal_bridge/models/cancel", { id: t.id })) }, "Stop")
             : h("span"),
-          active ? h("div", { class: `mb-bar${known && t.state === "running" && !finishing ? "" : " indeterminate"}` }, h("div", { style: `width: ${pct}%` })) : null);
+          bar);
       })) : "");
   }
 
@@ -481,4 +490,107 @@ export async function openModels({ onChanged } = {}) {
 
   render();
   await load();
+}
+
+// -- upload missing models -------------------------------------------------------------------
+// Opened when a cloud run stops because the workflow uses models that are only on this computer.
+
+let missingOpen = null;
+
+export async function openMissingModels(models, { onRun } = {}) {
+  // Dropdowns refresh and toasts show from the global modal_bridge.models listener in modal_bridge.js.
+  if (missingOpen || modelsOpen) return; // the Cloud models window already offers uploads
+  const key = (m) => `${m.folder}/${m.name}`;
+  // ids: the uploads this dialog follows. The bridge keeps finished transfers for a while, so an old
+  // "done" upload of a model deleted since then must not count; only ones running now or started here.
+  const ui = { sizes: {}, transfers: {}, errors: {}, ids: new Set(), started: false, busy: false };
+  const settled = (t) => t && (ACTIVE.includes(t.state) || t.state === "done");
+  function track(t) {
+    if (t.kind !== "upload" || !models.some((m) => key(m) === key(t))) return;
+    if (!ui.ids.has(t.id) && !ACTIVE.includes(t.state)) return;
+    ui.ids.add(t.id);
+    ui.transfers[key(t)] = t;
+    if (ACTIVE.includes(t.state)) ui.started = true; // e.g. an upload left running when this window was hidden
+    if (settled(t)) delete ui.errors[key(t)]; // e.g. "already uploading" from a click before the listing arrived
+  }
+  const onTransfers = ({ detail }) => {
+    for (const t of detail.transfers || []) track(t);
+    render();
+  };
+  api.addEventListener("modal_bridge.models", onTransfers);
+  const d = dialog("Models only on this computer", () => {
+    api.removeEventListener("modal_bridge.models", onTransfers);
+    missingOpen = null;
+  });
+  missingOpen = d;
+
+  const intro = h("p", { class: "mb-muted" });
+  const list = h("div", { class: "mb-scroll" });
+  const msg = h("div");
+  const actions = h("div", { class: "mb-row" });
+  d.body.append(h("div", { class: "mb-step" }, intro, list, msg, actions));
+
+  async function upload() {
+    ui.started = true;
+    ui.busy = true;
+    render();
+    for (const m of models) {
+      if (settled(ui.transfers[key(m)])) continue;
+      delete ui.errors[key(m)];
+      try {
+        const t = await call("/modal_bridge/models/upload", { folder: m.folder, name: m.name });
+        ui.ids.add(t.id);
+        if (!ui.transfers[key(m)] || ui.transfers[key(m)].id !== t.id) ui.transfers[key(m)] = t; // events may already be newer
+      } catch (e) {
+        // A transfer event can arrive before this answer; only show the error if nothing is under way.
+        if (!settled(ui.transfers[key(m)])) ui.errors[key(m)] = e.message;
+      }
+      render();
+    }
+    ui.busy = false;
+    render();
+  }
+
+  function render() {
+    const states = models.map((m) => (ui.errors[key(m)] ? "error" : ui.transfers[key(m)]?.state));
+    const done = states.every((s) => s === "done");
+    const failed = states.some((s) => s === "error" || s === "cancelled");
+    const running = states.some((s) => ACTIVE.includes(s));
+    const total = models.reduce((n, m) => n + (ui.sizes[key(m)] || 0), 0);
+
+    const one = models.length === 1;
+    intro.textContent = done
+      ? `Uploaded. ${one ? "It stays" : "They stay"} in your Modal cloud, so you only do this once.`
+      : `This workflow uses ${one ? "a model that isn't" : `${models.length} models that aren't`} in your Modal cloud yet. ` +
+        `Upload ${one ? "it" : "them"} once and ${one ? "it stays" : "they stay"} there. Big files take a while on a home connection; ` +
+        "you can close this window and keep working meanwhile.";
+    fill(list, models.map((m) => {
+      const t = ui.transfers[key(m)];
+      const view = t ? transferView(t) : null;
+      return h("div", { class: "mb-item" },
+        h("span", { class: "mb-name" }, key(m)),
+        ui.errors[key(m)] ? h("span", { class: "mb-fail" }, ui.errors[key(m)]) : view ? view.status : h("span", { class: "mb-size" }, ui.sizes[key(m)] ? formatBytes(ui.sizes[key(m)]) : ""),
+        h("span"),
+        view?.bar);
+    }));
+    fill(msg, failed && !running && !ui.busy ? h("p", { class: "mb-fail" }, "Some uploads didn't finish. Try again, or pick models that are in the cloud.") : "");
+    fill(actions,
+      done
+        ? h("button", { class: "mb-btn", onclick: () => { d.close(); onRun?.(); } }, "Run again")
+        : !ui.started || (failed && !running && !ui.busy)
+          ? h("button", { class: "mb-btn", disabled: ui.busy, onclick: upload },
+              `${ui.started ? "Try again" : "Upload"}${total ? ` (${formatBytes(total)})` : ""}`)
+          : h("span", { class: "mb-muted" }, "Uploading..."),
+      h("button", { class: "mb-btn secondary", onclick: () => d.close() }, done ? "Close" : ui.started ? "Hide" : "Not now"));
+  }
+
+  render();
+  try {
+    const listing = await call("/modal_bridge/models");
+    for (const m of listing.local) ui.sizes[key(m)] = m.size;
+    for (const t of listing.transfers) track(t); // uploads already under way
+  } catch {
+    // Sizes are only shown for information; uploading still works.
+  }
+  render();
 }

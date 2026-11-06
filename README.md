@@ -31,7 +31,7 @@ Modal's free plan includes monthly credit. Set a spending limit in the Modal das
 - **Settings → Modal Cloud:** which GPU to use, and how long it stays on after a run.
 - **Models:** open **Extensions → Modal Cloud → Cloud models** to see what's in your cloud, add a model by pasting a Hugging Face or Civitai link (your Modal account downloads it directly), upload a model from your computer, or delete one.
   - Models in your cloud appear in ComfyUI's model lists.
-  - If a workflow uses a model that's only on your computer, you get a clear message before anything is sent.
+  - If a workflow uses a model that's only on your computer, you get a clear message before anything is sent, and a window offering to upload just those models. Click **Upload**, then **Run again** when they're done.
 - **Input images** are uploaded automatically.
 - **Cancel** works as usual.
 - **Extensions → Modal Cloud:** setup, check setup and spending, cloud models, refresh the cloud model list.

@@ -313,7 +313,7 @@ class Setup:
             "workflow": None,
             "inputs": [],
             "gpu": gpu,
-            "client": {"bridge_version": "0.3.0", "comfyui_version": backend.COMFYUI_VERSION},
+            "client": {"bridge_version": "0.3.1", "comfyui_version": backend.COMFYUI_VERSION},
         }
         t0 = time.time()
         result = await client.worker(gpu, scaledown_s).run.remote.aio(payload)

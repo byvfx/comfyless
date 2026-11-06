@@ -41,8 +41,9 @@ _setup: Setup | None = None
 _models: ModelManager | None = None
 
 
-def _bad_request(error_type: str, message: str, details: str = "", node_errors: dict | None = None):
-    error = {"type": error_type, "message": message, "details": details, "extra_info": {}}
+def _bad_request(error_type: str, message: str, details: str = "", node_errors: dict | None = None,
+                 extra_info: dict | None = None):
+    error = {"type": error_type, "message": message, "details": details, "extra_info": extra_info or {}}
     return web.json_response({"error": error, "node_errors": node_errors or {}}, status=400)
 
 
@@ -158,11 +159,19 @@ def setup() -> None:
 
         missing, model_refs = cloud_models.check_and_rewrite(prompt)
         if missing:
+            models = []
+            for node in missing.values():
+                for err in node["errors"]:
+                    model = err["extra_info"].get("modal_bridge_model")
+                    if model and model not in models:
+                        models.append(model)
             return _bad_request(
                 "prompt_outputs_failed_validation",
                 "Some models are only on this computer",
                 "Upload them in Extensions > Modal Cloud > Cloud models, or choose models that are in the cloud.",
                 missing,
+                # The frontend offers to upload these (Upload missing models).
+                {"modal_bridge_missing_models": models},
             )
 
         input_files = await asyncio.to_thread(inputs_mod.collect, prompt, model_refs)

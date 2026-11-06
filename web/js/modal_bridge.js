@@ -3,7 +3,7 @@
 // response, so the frontend's own queueing, error display and progress tracking keep working.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { openHealth, openModels, openSetup } from "./setup_wizard.js";
+import { openHealth, openMissingModels, openModels, openSetup } from "./setup_wizard.js";
 
 const EXT = "ModalBridge";
 const SETTING = {
@@ -105,6 +105,14 @@ function installFetchHook() {
       if (res.ok) {
         const { prompt_id } = await res.clone().json();
         if (prompt_id) cloudJobs.add(prompt_id);
+      } else {
+        // Models only on this computer: offer to upload them, next to ComfyUI's own error display.
+        const missing = (await res.clone().json().catch(() => ({})))?.error?.extra_info?.modal_bridge_missing_models;
+        if (missing?.length) {
+          setTimeout(() => openMissingModels(missing, {
+            onRun: () => app.extensionManager.command.execute("Comfy.QueuePrompt"),
+          }), 0);
+        }
       }
       return res;
     }

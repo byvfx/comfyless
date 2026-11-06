@@ -101,6 +101,8 @@ class CloudModels:
                 if self.by_kind is None:
                     continue
                 if not any(posix in self.by_kind.get(k, ()) for k in matched):
+                    # The folder the real file is in, so the frontend can offer to upload it.
+                    folder = next((k for k in matched if self._has_real_local(k, posix)), matched[0])
                     node_errors.setdefault(
                         node_id,
                         {"errors": [], "dependent_outputs": [], "class_type": node.get("class_type")},
@@ -111,7 +113,7 @@ class CloudModels:
                             "message": "Model is only on this computer",
                             "details": f"{input_name}: {value} is only on this computer, not in your Modal cloud. "
                             "Upload it in Extensions > Modal Cloud > Cloud models, or pick a cloud model.",
-                            "extra_info": {"input_name": input_name},
+                            "extra_info": {"input_name": input_name, "modal_bridge_model": {"folder": folder, "name": posix}},
                         }
                     )
         return node_errors, model_refs
