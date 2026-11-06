@@ -353,9 +353,13 @@ class ComfyWorker:
 
         sender = _EventSender(modal.Queue.from_name(EVENTS_QUEUE, create_if_missing=True), job["job_id"])
         try:
-            return self._run_job(job, sender.emit)
+            result = self._run_job(job, sender.emit)
         finally:
+            t_flush = time.time()
             sender.close()
+        if "timings" in result:  # not on an early error result
+            result["timings"]["flush_s"] = time.time() - t_flush
+        return result
 
     def _run_job(self, job: dict, emit) -> dict:
         import requests
@@ -437,6 +441,7 @@ class ComfyWorker:
                 "total_s": t_done - t0,
             },
             "gpu": job.get("gpu") or DEFAULT_GPU,
+            "where": f"{os.environ.get('MODAL_CLOUD_PROVIDER', '?')} {os.environ.get('MODAL_REGION', '?')}",
             "comfyui_version": self.built["comfyui_version"],
         }
 
