@@ -1,7 +1,7 @@
 [project]
 name = "comfyless"
 description = "Run ComfyUI workflows on cloud GPUs in your own Modal account, straight from your local ComfyUI. Sign in, deploy and run without a terminal."
-version = "0.3.2"
+version = "0.3.3"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = ["modal>=1.6.3,<2"]

@@ -181,7 +181,7 @@ class CloudRunner:
             "inputs": [f.as_job_entry() for f in job.input_files],
             "partial_execution_targets": job.partial_execution_targets,
             "gpu": job.gpu,
-            "client": {"bridge_version": "0.3.2", "comfyui_version": backend.COMFYUI_VERSION},
+            "client": {"bridge_version": "0.3.3", "comfyui_version": backend.COMFYUI_VERSION},
         }
         worker = self.client.worker(job.gpu, job.scaledown_s)
         sent_at = time.time()
