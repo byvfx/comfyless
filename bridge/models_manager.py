@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import ssl
 import time
 import urllib.parse
 import urllib.request
@@ -93,10 +94,22 @@ def normalize_url(url: str) -> str:
     return url
 
 
+@functools.cache
+def _ssl_context() -> ssl.SSLContext:
+    """The system's trusted certificates plus certifi's (modal installs certifi). A fresh Windows fetches a site's
+    root certificate only when Windows itself visits the site, so the system store alone can fail there; keeping
+    it means a corporate proxy's CA or SSL_CERT_FILE still work."""
+    import certifi
+
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=certifi.where())
+    return context
+
+
 def _civitai_latest_version(model_id: str) -> str:
     req = urllib.request.Request(f"https://civitai.com/api/v1/models/{model_id}", headers={"User-Agent": "comfyless"})
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as resp:
             versions = json.load(resp).get("modelVersions") or []
     except Exception as exc:
         raise errors.BridgeError(f"Couldn't look up that Civitai model ({exc}). Paste its download link instead.") from exc

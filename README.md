@@ -110,6 +110,9 @@ Your packs in `custom_nodes/` are mirrored to the cloud when you deploy:
 | A download says it was refused (401/403) | The model needs a key (**Setup**, step 2), or you need to accept its license on the model's page first. |
 | "That link opened a web page, not a file" | Use the file's download link. On Hugging Face, open the file in the **Files** tab and copy the link from there. |
 | The first run after a break is slow | Starting a GPU takes 30 to 45 seconds. Later runs are fast while it stays warm. |
+| Comfyless isn't in Manager's list | Wait a moment for the list to finish loading and search again. Or use **Install via Git URL** with `https://github.com/byvfx/comfyless`. |
+| Installing from Manager fails with `CERTIFICATE_VERIFY_FAILED` | Common on a brand-new Windows, which adds a site's certificate only when Windows itself visits it. Open `https://cdn.comfy.org` once in Edge, then click **Install** again. |
+| ComfyUI won't start: "Visual C++ Redistributable is not installed" or an error loading `c10.dll` | ComfyUI needs Microsoft's Visual C++ runtime, which a brand-new Windows doesn't have. Install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and start ComfyUI again. |
 | Anything else | Open **Check setup and spending**: each row says what's wrong and how to fix it. |
 
 Limitations for now: cloud jobs don't appear in the queue panel, and packs that need system software the cloud doesn't have may not install.
