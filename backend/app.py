@@ -22,6 +22,7 @@ import urllib.parse
 from pathlib import Path, PurePosixPath
 
 import modal
+import modal.experimental
 
 APP_NAME = "comfy-modal-bridge"
 SCHEMA_VERSION = 1
@@ -101,6 +102,10 @@ FORWARDED_EVENTS = {
     "execution_success",
 }
 PROGRESS_MIN_INTERVAL_S = 0.25
+# Binary websocket frames relayed to the local UI: latent previews (with node metadata when the
+# server supports it) and progress text. The first 4 bytes of a frame are the event type.
+FORWARDED_BINARY_EVENTS = {1, 3, 4}  # PREVIEW_IMAGE, TEXT, PREVIEW_IMAGE_WITH_METADATA
+PREVIEW_MAX_BYTES = 900 * 1024  # a Queue item may be 1 MiB; previews are a few tens of KB
 INLINE_MAX_BYTES = 32 * 1024 * 1024
 HISTORY_WAIT_S = 30
 INTERRUPT = "interrupt"
@@ -330,7 +335,10 @@ class ComfyWorker:
         self.jobs_run = 0
         self._link_model_dirs()
         self.proc = subprocess.Popen(
-            [sys.executable, "main.py", "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"],
+            # Previews on by default: without --preview-method ComfyUI makes none. The request's
+            # own preview_method (extra_data) still overrides it per job, as locally.
+            [sys.executable, "main.py", "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch",
+             "--preview-method", "auto"],
             cwd=COMFY_DIR,
         )
         self._wait_healthy()
@@ -349,6 +357,9 @@ class ComfyWorker:
         if job.get("schema_version") != SCHEMA_VERSION:
             return {"status": "error", "error": {"message": f"unsupported schema_version {job.get('schema_version')!r}"}}
         if self.proc.poll() is not None:
+            # Otherwise this container lives out its keep-warm window, is handed every job and fails
+            # each one, billing the whole time. Stop taking jobs; Modal starts a fresh container.
+            modal.experimental.stop_fetching_inputs()
             raise RuntimeError(f"ComfyUI exited with code {self.proc.returncode}")
 
         sender = _EventSender(modal.Queue.from_name(EVENTS_QUEUE, create_if_missing=True), job["job_id"])
@@ -372,15 +383,20 @@ class ComfyWorker:
         emit("worker_started", {"cold": cold, "boot_s": self.boot_s if cold else 0.0})
 
         io_vol.reload()
+        self._refresh_models()
         self._stage_inputs(job.get("inputs", []))
         t_staged = time.time()
 
-        extra_data = {}
+        # What the frontend sent with the prompt, minus the workflow (sent apart, below). Includes
+        # the Comfy account token partner (API) nodes need; ComfyUI removes it before queueing.
+        extra_data = dict(job.get("extra_data") or {})
         if job.get("workflow"):
             extra_data["extra_pnginfo"] = {"workflow": job["workflow"]}
 
         ws = websocket.create_connection(f"ws://{COMFY_HOST}/ws?clientId={job_id}")
         try:
+            # Must be the first message: tells ComfyUI to send previews with node metadata (type 4).
+            ws.send(json.dumps({"type": "feature_flags", "data": {"supports_preview_metadata": True}}))
             resp = requests.post(
                 f"http://{COMFY_HOST}/prompt",
                 # Reusing job_id as ComfyUI's prompt_id lets the local bridge relay events unchanged.
@@ -444,6 +460,22 @@ class ComfyWorker:
             "where": f"{os.environ.get('MODAL_CLOUD_PROVIDER', '?')} {os.environ.get('MODAL_REGION', '?')}",
             "comfyui_version": self.built["comfyui_version"],
         }
+
+    def _refresh_models(self) -> None:
+        """Pick up models added to the volume since this container started.
+
+        A container sees a Volume as of mount time and other containers' commits (uploads, Cloud
+        models downloads) only after reload(). Without this a warm worker rejects the "Upload
+        missing models, then Run again" flow with "value not in list" until it scales down.
+        reload() fails while a file on the volume is open, e.g. a model ComfyUI still has mapped
+        from the previous job; then the models appear on the next container start, as before.
+        """
+        try:
+            models_vol.reload()
+        except Exception as e:  # noqa: BLE001 - never fail the job over a stale model list
+            print(f"models volume not reloaded ({e}); new models appear on the next cold start")
+            return
+        self._link_model_dirs()
 
     def _link_model_dirs(self) -> None:
         """Expose each top-level folder of the models volume as ComfyUI/models/<name>."""
@@ -519,7 +551,8 @@ class ComfyWorker:
         while True:
             raw = ws.recv()
             if isinstance(raw, bytes):
-                continue  # binary latent previews; not relayed yet
+                self._relay_binary(raw, emit, last_sent)
+                continue
             msg = json.loads(raw)
             event_type, data = msg.get("type"), msg.get("data") or {}
             if data.get("prompt_id") not in (None, prompt_id):
@@ -542,6 +575,20 @@ class ComfyWorker:
                 return "interrupted", data
             if event_type == "executing" and data.get("node") is None and data.get("prompt_id") == prompt_id:
                 return "success", None
+
+    @staticmethod
+    def _relay_binary(raw: bytes, emit, last_sent: dict[str, float]) -> None:
+        """Forward a preview frame, throttled like progress; the bridge re-sends it byte for byte."""
+        if len(raw) < 4 or len(raw) > PREVIEW_MAX_BYTES:
+            return
+        event = int.from_bytes(raw[:4], "big")
+        if event not in FORWARDED_BINARY_EVENTS:
+            return
+        now = time.time()
+        if event != 3 and now - last_sent.get("binary", 0.0) < PROGRESS_MIN_INTERVAL_S:
+            return
+        last_sent["binary"] = now
+        emit("binary", {"event": event, "payload": bytes(raw[4:])})
 
     def _collect_outputs(self, prompt_id: str, job_id: str) -> tuple[dict, list[dict], bool]:
         """Gather every output file of the prompt.

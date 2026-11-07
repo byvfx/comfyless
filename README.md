@@ -56,7 +56,9 @@ Click **Local** next to the Run button so it says **Cloud**, then press **Run** 
 
 ![The Run on Cloud switch next to the Run button](https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/run-on-cloud.png)
 
-Progress, errors and images show in ComfyUI as normal, and outputs are saved to your local `output/` folder. Input images are uploaded automatically, and Cancel works as usual. Each finished run shows roughly what it cost.
+Progress, live previews, errors and images show in ComfyUI as normal, and outputs are saved to your local `output/` folder. Input images are uploaded automatically, and Cancel works as usual. Each finished run shows roughly what it cost.
+
+**Partner nodes** (Nano Banana, Qwen, Kling, OpenAI and the other nodes under *partner*) work on the cloud too. They use your Comfy account exactly as they do locally, so sign in to Comfy (the account button in the top-right) or add your API key first. They bill your Comfy account, not Modal.
 
 Choose the GPU in **Settings → Modal Cloud**:
 - **L40S** (default): good for most image work.
@@ -121,6 +123,7 @@ Limitations for now: cloud jobs don't appear in the queue panel, and packs that 
 
 - Your workflows, images and models stay in your own Modal account.
 - Your Modal sign-in is stored where Modal's own tools keep it (`~/.modal.toml`), and download keys only in your Modal account.
+- When a workflow uses partner nodes, your Comfy sign-in token travels with the job to your Modal container, as it does to your local ComfyUI, and is used there only to call Comfy's API. It isn't stored anywhere in the cloud.
 - Setup can only be changed from the computer running ComfyUI.
 
 ## License

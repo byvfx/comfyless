@@ -1,10 +1,12 @@
 """Runs cloud jobs one at a time and mirrors their execution in the local UI (spec §3, §6.4, §6.6).
 
 Jobs are serialized like ComfyUI's own queue, so the frontend only ever sees one running prompt.
-Cloud websocket events are relayed with send_sync to the browser tab that queued the prompt. The
-exceptions are `executed` and the end-of-run events, which are held back until the output files
-have been downloaded under local names. The end-of-run event is rebuilt from the call result if
-the worker's copy never arrived, so the browser always learns that the job finished.
+Cloud websocket events are relayed with send_sync to the browser tab that queued the prompt, and
+the worker's binary frames (latent previews, progress text) with send_bytes, so previews show on
+the running node as they do for a local run. The exceptions are `executed` and the end-of-run
+events, which are held back until the output files have been downloaded under local names. The
+end-of-run event is rebuilt from the call result if the worker's copy never arrived, so the browser
+always learns that the job finished.
 """
 
 from __future__ import annotations
@@ -41,6 +43,9 @@ class CloudJob:
     scaledown_s: int
     partial_execution_targets: list[str] | None
     input_files: list[inputs_mod.InputFile] = field(default_factory=list)
+    # Forwarded to the cloud's /prompt. Holds the user's Comfy account token for partner nodes, so
+    # it is kept out of the repr and never logged.
+    extra_data: dict = field(default_factory=dict, repr=False)
 
 
 class CloudRunner:
@@ -120,6 +125,10 @@ class CloudRunner:
     def _send(self, job: CloudJob, event: str, data: dict) -> None:
         PromptServer.instance.send_sync(event, data, job.client_id)
 
+    def _send_bytes(self, job: CloudJob, event: int, payload: bytes) -> None:
+        """Forward one of the worker's binary websocket frames (a preview image) as-is."""
+        asyncio.get_running_loop().create_task(PromptServer.instance.send_bytes(event, payload, job.client_id))
+
     def _status(self, job: CloudJob, state: str, detail: str, severity: str = "info") -> None:
         self._send(job, "modal_bridge.status", {"prompt_id": job.prompt_id, "state": state, "detail": detail, "severity": severity})
 
@@ -179,6 +188,7 @@ class CloudRunner:
             "prompt": job.prompt,
             "workflow": job.workflow,
             "inputs": [f.as_job_entry() for f in job.input_files],
+            "extra_data": job.extra_data,
             "partial_execution_targets": job.partial_execution_targets,
             "gpu": job.gpu,
             "client": {"bridge_version": "0.3.4", "comfyui_version": backend.COMFYUI_VERSION},
@@ -262,6 +272,10 @@ class CloudRunner:
     def _relay(self, job: CloudJob, event: dict, held_executed: list[dict], held_end: list[tuple[str, dict]]) -> bool:
         """Forward one worker event to the UI. Returns True if it shows the worker has started."""
         kind, data = event["type"], event["data"]
+        if kind == "binary":
+            if isinstance(data.get("event"), int) and isinstance(data.get("payload"), (bytes, bytearray)):
+                self._send_bytes(job, data["event"], data["payload"])
+            return True
         if kind == "worker_started":
             self._status(job, "running", "Cold start: GPU booted" if data.get("cold") else "Running on a warm GPU")
             return True

@@ -16,6 +16,7 @@ import logging
 import uuid
 
 import execution
+import nodes
 from aiohttp import web
 from server import PromptServer
 
@@ -38,16 +39,60 @@ MODAL_APPS_URL = "https://modal.com/apps"
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
+# extra_data keys the cloud's ComfyUI needs from the frontend's request. The two Comfy account
+# credentials let partner (API) nodes bill the user's Comfy account from the cloud, exactly as they
+# would locally; without them every partner node fails with "Please login first". ComfyUI pops them
+# off extra_data before anything is queued or written to history, on both ends.
+FORWARDED_EXTRA_DATA = ("auth_token_comfy_org", "api_key_comfy_org", "comfy_usage_source", "preview_method")
+
 _runner: CloudRunner | None = None
 _setup: Setup | None = None
 _models: ModelManager | None = None
 _stopping = False  # Stop now is cancelling work and stopping containers; nothing new may start
 
 
+def _is_canonical_uuid(value) -> bool:
+    """The prompt_id rule of ComfyUI's own /prompt: a lowercase, hyphenated UUID."""
+    try:
+        return isinstance(value, str) and str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
 def _bad_request(error_type: str, message: str, details: str = "", node_errors: dict | None = None,
                  extra_info: dict | None = None):
     error = {"type": error_type, "message": message, "details": details, "extra_info": extra_info or {}}
     return web.json_response({"error": error, "node_errors": node_errors or {}}, status=400)
+
+
+def _is_api_node(class_type: str | None) -> bool:
+    """A partner node that calls Comfy's API with the user's account (V1 API_NODE or V3 is_api_node)."""
+    cls = nodes.NODE_CLASS_MAPPINGS.get(class_type)
+    try:
+        return bool(getattr(cls, "API_NODE", False))
+    except Exception:
+        return False
+
+
+def _api_nodes_without_account(prompt: dict, extra: dict) -> dict:
+    """node_errors for partner nodes when the request carries no Comfy sign-in or API key."""
+    if extra.get("auth_token_comfy_org") or extra.get("api_key_comfy_org"):
+        return {}
+    errors = {}
+    for node_id, node in prompt.items():
+        if _is_api_node(node.get("class_type")):
+            errors[node_id] = {
+                "errors": [{
+                    "type": "custom_validation_failed",
+                    "message": "Partner node needs your Comfy account",
+                    "details": f"{node['class_type']} runs on Comfy's API and bills your Comfy account, not Modal. "
+                               "Sign in to Comfy (the account button in the top-right) or add an API key, then run again.",
+                    "extra_info": {},
+                }],
+                "dependent_outputs": [],
+                "class_type": node.get("class_type"),
+            }
+    return errors
 
 
 async def _sync_models() -> dict:
@@ -144,7 +189,11 @@ def setup() -> None:
         gpu = options.get("gpu") if options.get("gpu") in GPUS else DEFAULT_GPU
         scaledown_s = int(min(max(float(options.get("scaledown_s") or DEFAULT_SCALEDOWN_S), 60), 1200))
 
-        prompt_id = str(json_data.get("prompt_id") or uuid.uuid4())
+        prompt_id = json_data.get("prompt_id") or str(uuid.uuid4())
+        if not _is_canonical_uuid(prompt_id):
+            # The id names the job's event-queue partition and its outputs folder on the cloud, so
+            # it must never be an arbitrary string. Same rule and error as ComfyUI's /prompt.
+            return _bad_request("invalid_prompt_id", "Invalid prompt_id", "prompt_id must be a UUID")
         partial = json_data.get("partial_execution_targets")
         if hasattr(server, "node_replace_manager"):
             server.node_replace_manager.apply_replacements(prompt)
@@ -179,8 +228,19 @@ def setup() -> None:
                 {"modal_bridge_missing_models": models},
             )
 
-        input_files = await asyncio.to_thread(inputs_mod.collect, prompt, model_refs)
         extra = json_data.get("extra_data") or {}
+        if not isinstance(extra, dict):
+            extra = {}
+        if no_account := _api_nodes_without_account(prompt, extra):
+            return _bad_request(
+                "prompt_outputs_failed_validation",
+                "Partner nodes need your Comfy account",
+                "Sign in to Comfy (the account button in the top-right) or add an API key, then run again. "
+                "Partner nodes bill your Comfy account, not Modal.",
+                no_account,
+            )
+
+        input_files = await asyncio.to_thread(inputs_mod.collect, prompt, model_refs)
         if reason := _busy("login", "deploy", "stopping"):
             return _bad_request("modal_busy", "Modal Cloud setup is in progress", reason)
         _runner.submit(
@@ -193,6 +253,7 @@ def setup() -> None:
                 scaledown_s=scaledown_s,
                 partial_execution_targets=partial,
                 input_files=input_files,
+                extra_data={k: extra[k] for k in FORWARDED_EXTRA_DATA if extra.get(k) is not None},
             )
         )
         number = len(_runner.pending)
