@@ -57,10 +57,18 @@ const CSS = `
 .mb-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #6b7280; }
 .mb-dot.on { background: #22c55e; } .mb-dot.bad { background: #ef4444; }
 .mb-btn.danger { background: transparent; color: #ef4444; border: 1px solid #ef4444; }
-.mb-packs > summary { cursor: pointer; font-size: 13px; opacity: .85; padding: 4px 0; }
-.mb-group { font-size: 11px; opacity: .6; margin: 10px 0 0; text-transform: uppercase; letter-spacing: .6px; }
-.mb-pack { padding: 8px 0; border-bottom: 1px solid var(--border-color, #333); font-size: 13px; }
-.mb-pack:last-child { border-bottom: 0; }
+.mb-step.mb-featured { border: 1px solid var(--p-primary-color, #3b82f6); border-radius: 10px; padding: 12px 14px; margin: 0 0 14px;
+  background: color-mix(in srgb, var(--p-primary-color, #3b82f6) 8%, transparent); }
+.mb-featured h3 .mb-badge { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; padding: 2px 7px; border-radius: 999px;
+  background: var(--p-primary-color, #3b82f6); color: #fff; }
+.mb-packs > summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 6px 0; list-style: none; display: flex; gap: 8px; align-items: center; }
+.mb-packs > summary::-webkit-details-marker { display: none; }
+.mb-packs > summary::before { content: "▸"; opacity: .7; transition: transform .15s; }
+.mb-packs[open] > summary::before { transform: rotate(90deg); }
+.mb-packs > summary .mb-muted { font-weight: 400; margin: 0; }
+.mb-group { font-size: 11px; opacity: .6; margin: 12px 0 2px; text-transform: uppercase; letter-spacing: .6px; }
+.mb-pack { padding: 10px 12px; margin-top: 6px; border: 1px solid var(--border-color, #333); border-radius: 8px; background: var(--comfy-input-bg, rgba(0,0,0,.18)); font-size: 13px; }
+.mb-pack.have { border-color: color-mix(in srgb, #22c55e 55%, var(--border-color, #333)); }
 .mb-pack-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .mb-pack-head strong { font-size: 14px; }
 .mb-pack .mb-muted { margin: 2px 0 0; }
@@ -415,7 +423,7 @@ let modelsOpen = null;
 export async function openModels({ onChanged } = {}) {
   if (modelsOpen) return;
   const ui = { list: null, error: null, busy: {}, actionError: null, confirm: null, filter: "",
-    packs: null, packsError: null, packsOpen: false, packMsg: null };
+    packs: null, packsError: null, packsOpen: true, packMsg: null };
   const onTransfers = ({ detail }) => {
     if (!ui.list) return;
     const before = new Map((ui.list.transfers || []).map((t) => [t.id, t.state]));
@@ -449,6 +457,7 @@ export async function openModels({ onChanged } = {}) {
 
   d.body.append(
     topMsg,
+    packsBox,
     h("div", { class: "mb-step" }, h("h3", {}, "Add a model from a link"),
       h("p", { class: "mb-muted" },
         "Paste a Hugging Face file link or a Civitai model page. Your Modal account downloads it directly, so nothing passes through this computer. " +
@@ -456,7 +465,6 @@ export async function openModels({ onChanged } = {}) {
       h("div", { class: "mb-row" }, url),
       h("div", { class: "mb-row" }, folder, filename, addBtn),
       addMsg),
-    packsBox,
     transfersBox,
     h("div", { class: "mb-step" }, h("div", { class: "mb-row" }, filter), cloudBox),
     h("div", { class: "mb-step" }, localBox));
@@ -530,13 +538,17 @@ export async function openModels({ onChanged } = {}) {
       const g = groups.find((x) => x.name === p.group) || groups[groups.push({ name: p.group, packs: [] }) - 1];
       g.packs.push(p);
     }
+    const inCloud = (ui.packs || []).filter((p) => packStatus(p).complete).length;
     const details = h("details", { class: "mb-packs", ontoggle: (e) => { ui.packsOpen = e.target.open; } },
-      h("summary", {}, ui.packs ? `${ui.packs.length} packs: Qwen Image, Flux Kontext, SDXL, depth and normal passes, mattes, upscaling, Wan video` : "Starter packs"),
+      h("summary", {}, h("span", { style: "white-space: nowrap" }, ui.packs ? `${ui.packs.length} packs` : "Starter packs"),
+        h("span", { class: "mb-muted" }, ui.packs ? `${inCloud ? `${inCloud} in your cloud · ` : ""}Qwen Image, Flux Kontext, SDXL, depth and normal passes, mattes, upscaling, Wan video` : "")),
       ui.packsError ? h("p", { class: "mb-fail" }, ui.packsError) : null,
       ui.packMsg ? h("p", { class: "mb-fail" }, ui.packMsg) : null,
       groups.flatMap((g) => [h("div", { class: "mb-group" }, g.name), ...g.packs.map(packView)]));
     if (ui.packsOpen) details.open = true;
-    fill(packsBox, h("div", { class: "mb-step" }, h("h3", {}, "Starter packs"), h("p", { class: "mb-muted" }, PACK_INTRO), details));
+    fill(packsBox, h("div", { class: "mb-step mb-featured" },
+      h("h3", {}, "Starter packs", h("span", { class: "mb-badge" }, "Start here")),
+      h("p", { class: "mb-muted" }, PACK_INTRO), details));
   }
 
   function packView(pack) {
@@ -545,7 +557,7 @@ export async function openModels({ onChanged } = {}) {
       : transferring ? h("span", { class: "mb-muted" }, "Downloading...")
       : have ? h("span", { class: "mb-muted" }, `${have} of ${pack.files.length} files in your cloud`) : null;
     const addLabel = complete ? "Added" : transferring ? "Downloading..." : have ? `Add the rest (${formatBytes(pack.missing_size)})` : `Add to cloud (${formatBytes(pack.size)})`;
-    return h("div", { class: "mb-pack" },
+    return h("div", { class: complete ? "mb-pack have" : "mb-pack" },
       h("div", { class: "mb-pack-head" }, h("strong", {}, pack.title), h("span", { class: "mb-size" }, `${formatBytes(pack.size)} · ${pack.gpu}`), status),
       h("div", { class: "mb-muted" }, pack.blurb),
       h("div", { class: "mb-row" },
