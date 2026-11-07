@@ -66,7 +66,14 @@ const CSS = `
 .mb-packs > summary::before { content: "▸"; opacity: .7; transition: transform .15s; }
 .mb-packs[open] > summary::before { transform: rotate(90deg); }
 .mb-packs > summary .mb-muted { font-weight: 400; margin: 0; }
-.mb-group { font-size: 11px; opacity: .6; margin: 12px 0 2px; text-transform: uppercase; letter-spacing: .6px; }
+.mb-group { margin: 10px 0 0; }
+.mb-group > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: baseline; padding: 4px 0;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; opacity: .75; }
+.mb-group > summary::-webkit-details-marker { display: none; }
+.mb-group > summary::before { content: "▸"; font-size: 12px; transition: transform .15s; }
+.mb-group[open] > summary::before { transform: rotate(90deg); }
+.mb-group > summary:hover { opacity: 1; }
+.mb-group > summary .mb-muted { font-weight: 400; text-transform: none; letter-spacing: 0; margin: 0; }
 .mb-pack { padding: 10px 12px; margin-top: 6px; border: 1px solid var(--border-color, #333); border-radius: 8px; background: var(--comfy-input-bg, rgba(0,0,0,.18)); font-size: 13px; }
 .mb-pack.have { border-color: color-mix(in srgb, #22c55e 55%, var(--border-color, #333)); }
 .mb-pack-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
@@ -423,7 +430,7 @@ let modelsOpen = null;
 export async function openModels({ onChanged } = {}) {
   if (modelsOpen) return;
   const ui = { list: null, error: null, busy: {}, actionError: null, confirm: null, filter: "",
-    packs: null, packsError: null, packsOpen: true, packMsg: null };
+    packs: null, packsError: null, packsOpen: true, packMsg: null, groupOpen: {} };
   const onTransfers = ({ detail }) => {
     if (!ui.list) return;
     const before = new Map((ui.list.transfers || []).map((t) => [t.id, t.state]));
@@ -541,14 +548,21 @@ export async function openModels({ onChanged } = {}) {
     const inCloud = (ui.packs || []).filter((p) => packStatus(p).complete).length;
     const details = h("details", { class: "mb-packs", ontoggle: (e) => { ui.packsOpen = e.target.open; } },
       h("summary", {}, h("span", { style: "white-space: nowrap" }, ui.packs ? `${ui.packs.length} packs` : "Starter packs"),
-        h("span", { class: "mb-muted" }, ui.packs ? `${inCloud ? `${inCloud} in your cloud · ` : ""}Qwen Image, Flux Kontext, SDXL, depth and normal passes, mattes, upscaling, Wan video` : "")),
+        h("span", { class: "mb-muted" }, ui.packs ? `${inCloud ? `${inCloud} in your cloud · ` : ""}Qwen Image, Flux, SDXL, depth and normal passes, mattes, upscaling, render passes to video, Wan video` : "")),
       ui.packsError ? h("p", { class: "mb-fail" }, ui.packsError) : null,
       ui.packMsg ? h("p", { class: "mb-fail" }, ui.packMsg) : null,
-      groups.flatMap((g) => [h("div", { class: "mb-group" }, g.name), ...g.packs.map(packView)]));
+      groups.map(groupView));
     if (ui.packsOpen) details.open = true;
     fill(packsBox, h("div", { class: "mb-step mb-featured" },
       h("h3", {}, "Starter packs", h("span", { class: "mb-badge" }, "Start here")),
       h("p", { class: "mb-muted" }, PACK_INTRO), details));
+  }
+
+  function groupView(g) {
+    const have = g.packs.filter((p) => packStatus(p).complete).length;
+    return h("details", { class: "mb-group", open: ui.groupOpen[g.name] !== false, ontoggle: (e) => { ui.groupOpen[g.name] = e.target.open; } },
+      h("summary", {}, g.name, h("span", { class: "mb-muted" }, `${g.packs.length} pack${g.packs.length === 1 ? "" : "s"}${have ? ` · ${have} in your cloud` : ""}`)),
+      ...g.packs.map(packView));
   }
 
   function packView(pack) {
