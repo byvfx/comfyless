@@ -20,7 +20,7 @@ If the search finds nothing (new versions wait for a Comfy Registry review), use
 
 ### 2. Set up
 
-After the restart, the **Modal Cloud setup** window opens by itself. You can reopen it any time from **Extensions → Modal Cloud → Setup**.
+After the restart, the **Modal Cloud setup** window opens by itself. Everything Comfyless does is in the **Modal Cloud** tab: click the **cloud icon** in ComfyUI's left sidebar. Reopen setup there any time with **Set up**. (The same commands are also in the main menu under **Extensions → Modal Cloud**.)
 
 ![Setup: connect your Modal account and add optional download keys](https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/setup-1-sign-in.png)
 
@@ -36,7 +36,7 @@ Then set a monthly spending limit in Modal's dashboard ([how](https://modal.com/
 
 ### 3. Add models
 
-Your cloud has its own model storage, separate from your computer. Open **Extensions → Modal Cloud → Cloud models**:
+Your cloud has its own model storage, separate from your computer. Open the **Modal Cloud** tab (cloud icon on the left) and click **Cloud models**:
 
 ![Cloud models: add a model from a link, and the models in your cloud](https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/cloud-models.png)
 
@@ -72,20 +72,20 @@ You pay Modal directly, by the second, only while a cloud GPU is on. Measured wi
 - **Starting a GPU** after a break takes 30 to 45 seconds.
 - **After a run, the GPU stays on** for a few minutes (5 by default, adjustable) so your next run starts instantly. That idle time is billed too and is usually most of the cost of a single image: one image on its own costs about 20 cents with the 5-minute default, or about 7 cents with 1 minute. Ten images in a row cost about a cent each.
 
-Modal's free plan includes monthly credit. **Extensions → Modal Cloud → Check setup and spending** shows what Modal billed this app today and this month, and whether any cloud GPU is on right now:
+Modal's free plan includes monthly credit. **Check setup and spending** in the **Modal Cloud** tab shows what Modal billed this app today and this month, and whether any cloud GPU is on right now:
 
 ![Check setup: cloud containers on now, spending, and Stop now](https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/check-setup.png)
 
 ## How to stop paying
 
-- **Right now:** click **Stop now** in *Check setup*, or use **Extensions → Modal Cloud → Stop cloud GPUs now**. This cancels running cloud jobs **and cloud model downloads**, and switches every cloud GPU off at once, instead of waiting out the idle time. A cancelled download has to be started again. Your deployed cloud worker and the models already in your cloud stay as they are, and your next run starts the GPU again.
+- **Right now:** click **Stop now** in *Check setup*, or click **Stop cloud GPUs now** in the **Modal Cloud** tab. This cancels running cloud jobs **and cloud model downloads**, and switches every cloud GPU off at once, instead of waiting out the idle time. A cancelled download has to be started again. Your deployed cloud worker and the models already in your cloud stay as they are, and your next run starts the GPU again.
 - **Day to day:** nothing to do. GPUs switch off by themselves after the **Keep GPU warm for** time. A shorter time costs less per image, and a longer one makes back-to-back runs faster.
 - **For good:** in the [Modal dashboard](https://modal.com/apps), stop the app `comfy-modal-bridge`. Then, under **Storage**, delete the volumes `comfy-models` (your cloud models) and `comfy-io`. Uninstall Comfyless from ComfyUI-Manager if you no longer want the switch.
 
 ## How to update
 
 1. In **Manager → Custom Nodes Manager**, update **Comfyless** and restart ComfyUI.
-2. Open **Extensions → Modal Cloud → Setup** and click **Deploy again**. *Check setup* also tells you when the cloud needs it.
+2. Open the **Modal Cloud** tab, click **Set up**, then **Deploy again**. *Check setup* also tells you when the cloud needs it.
 
 Deploy again after adding or updating custom node packs too.
 

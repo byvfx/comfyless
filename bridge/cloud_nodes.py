@@ -95,7 +95,7 @@ class CloudNodes:
             return f"{class_type} comes from {pack}, which isn't mirrored to the cloud: {skipped[pack]}"
         report = built.get(pack)
         if report is None:
-            return f"{class_type} comes from {pack}, which isn't in your cloud yet. Open Extensions > Modal Cloud > Check setup and click Deploy."
+            return f"{class_type} comes from {pack}, which isn't in your cloud yet. In the Modal Cloud tab (the cloud icon on the left), open Check setup and click Deploy."
         if report.get("status") == "failed":
             return f"{pack} failed to install in the cloud ({report.get('step')}): {(report.get('error') or '')[:300]}"
         return (f"{pack} is installed in the cloud, but its {class_type} node didn't load there. "

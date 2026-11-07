@@ -158,7 +158,7 @@ def setup() -> None:
             return _bad_request(
                 "prompt_outputs_failed_validation",
                 "Some nodes aren't available in the cloud",
-                "Mirror your custom nodes with Deploy in Extensions > Modal Cloud > Check setup, or run this workflow locally.",
+                "Mirror your custom nodes: in the Modal Cloud tab (the cloud icon on the left), open Check setup and click Deploy. Or run this workflow locally.",
                 unavailable,
             )
 
@@ -173,7 +173,7 @@ def setup() -> None:
             return _bad_request(
                 "prompt_outputs_failed_validation",
                 "Some models are only on this computer",
-                "Upload them in Extensions > Modal Cloud > Cloud models, or choose models that are in the cloud.",
+                "Upload them from Cloud models in the Modal Cloud tab (the cloud icon on the left), or choose models that are in the cloud.",
                 missing,
                 # The frontend offers to upload these (Upload missing models).
                 {"modal_bridge_missing_models": models},

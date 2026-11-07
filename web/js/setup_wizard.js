@@ -47,10 +47,19 @@ const CSS = `
 .mb-bar > div { height: 100%; background: var(--p-primary-color, #3b82f6); transition: width .4s; }
 .mb-bar.indeterminate > div { width: 30% !important; animation: mb-slide 1.2s ease-in-out infinite; }
 @keyframes mb-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+.mb-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.45; color: var(--fg-color, #ddd); }
+.mb-panel h2 { margin: 0 0 2px; font-size: 16px; font-weight: 600; }
+.mb-panel .mb-btn { width: 100%; text-align: left; }
+.mb-panel .mb-select { width: 100%; }
+.mb-label { font-size: 12px; opacity: .7; margin-top: 8px; }
+.mb-status { display: flex; gap: 8px; align-items: baseline; }
+.mb-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #6b7280; }
+.mb-dot.on { background: #22c55e; } .mb-dot.bad { background: #ef4444; }
+.mb-btn.danger { background: transparent; color: #ef4444; border: 1px solid #ef4444; }
 `;
 
 // Build DOM without innerHTML, so server text (errors, log lines) is never parsed as HTML.
-function h(tag, props = {}, ...children) {
+export function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
     if (k === "class") el.className = v;
@@ -70,8 +79,12 @@ async function call(path, body) {
   return data;
 }
 
-function dialog(title, onClose) {
+export function ensureStyle() {
   if (!document.getElementById(STYLE_ID)) document.head.append(h("style", { id: STYLE_ID }, CSS));
+}
+
+function dialog(title, onClose) {
+  ensureStyle();
   const body = h("div", { class: "mb-body" });
   // A native modal dialog: it takes focus, keeps Tab and screen readers inside, and Escape closes it.
   const el = h("dialog", { class: "mb-dialog", "aria-label": title },

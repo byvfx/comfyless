@@ -4,6 +4,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { openHealth, openMissingModels, openModels, openSetup, stopNow } from "./setup_wizard.js";
+import { renderCloudPanel } from "./cloud_panel.js";
 
 const EXT = "ModalBridge";
 const SETTING = {
@@ -19,6 +20,8 @@ const cloudJobs = new Set();
 let runningPromptId = null;
 // Last /modal_bridge/status answer; updated by modal_bridge.connection events.
 let status = { connected: false, setup_done: true };
+// The Modal Cloud sidebar tab while it's open; null when closed.
+let panel = null;
 
 const toggleButton = {
   icon: "icon-[lucide--cloud]",
@@ -50,6 +53,7 @@ function refreshToggle() {
     const label = el.querySelector("span:last-child");
     if (label) label.textContent = toggleButton.label;
   }
+  panel?.update();
 }
 
 function showSetup() {
@@ -83,8 +87,50 @@ async function refreshStatus() {
     status = await (await api.fetchApi("/modal_bridge/status")).json();
   } catch (e) {
     console.warn("[modal-bridge] status check failed", e);
+    // Don't keep showing the last answer as current: ComfyUI's server itself didn't reply.
+    status = { ...status, connected: false, unreachable: true, running: null, pending: 0, error: "Can't reach ComfyUI's server. Is ComfyUI still running?" };
   }
   return status;
+}
+
+async function syncModels() {
+  const res = await api.fetchApi("/modal_bridge/models/sync", { method: "POST" });
+  const body = await res.json();
+  if (!res.ok) return toast("error", "Cloud models", body.error);
+  await app.refreshComboInNodes?.();
+  toast("success", "Cloud models", `${body.models} models in the cloud`);
+}
+
+function registerSidebarTab() {
+  // Older frontends have no sidebar API; the Extensions > Modal Cloud menu still works there.
+  if (typeof app.extensionManager.registerSidebarTab !== "function") return;
+  app.extensionManager.registerSidebarTab({
+    id: "modal-cloud",
+    icon: "icon-[lucide--cloud]",
+    title: "Modal Cloud",
+    tooltip: "Modal Cloud: setup, cloud models, stop GPUs",
+    type: "custom",
+    render: (el) => {
+      panel?.dispose();
+      panel = renderCloudPanel(el, {
+        state: () => ({ status, cloudOn: !!setting(SETTING.enabled), gpu: setting(SETTING.gpu) }),
+        refreshStatus,
+        actions: {
+          toggle: toggleCloud,
+          setGpu: (gpu) => app.extensionManager.setting.set(SETTING.gpu, gpu),
+          setup: showSetup,
+          health: showHealth,
+          models: showModels,
+          syncModels,
+          stop: stopCloud,
+        },
+      });
+    },
+    destroy: () => {
+      panel?.dispose();
+      panel = null;
+    },
+  });
 }
 
 async function toggleCloud() {
@@ -184,6 +230,7 @@ function listenForStatus() {
   api.addEventListener("modal_bridge.connection", async ({ detail }) => {
     const was = status.connected;
     status = { ...status, connected: detail.connected, error: detail.error };
+    panel?.update();
     if (detail.connected && !was) {
       await app.refreshComboInNodes?.(); // cloud models just became available
       toast("success", "Modal Cloud connected", "Turn on Run on Cloud next to the Run button.", 4000);
@@ -253,18 +300,7 @@ app.registerExtension({
     { id: "ModalBridge.Health", label: "Check setup and spending", icon: "pi pi-heart", function: showHealth },
     { id: "ModalBridge.Models", label: "Cloud models", icon: "pi pi-database", function: showModels },
     { id: "ModalBridge.StopNow", label: "Stop cloud GPUs now", icon: "pi pi-power-off", function: stopCloud },
-    {
-      id: "ModalBridge.SyncModels",
-      label: "Refresh cloud model list",
-      icon: "pi pi-refresh",
-      function: async () => {
-        const res = await api.fetchApi("/modal_bridge/models/sync", { method: "POST" });
-        const body = await res.json();
-        if (!res.ok) return toast("error", "Cloud models", body.error);
-        await app.refreshComboInNodes?.();
-        toast("success", "Cloud models", `${body.models} models in the cloud`);
-      },
-    },
+    { id: "ModalBridge.SyncModels", label: "Refresh cloud model list", icon: "pi pi-refresh", function: syncModels },
   ],
   menuCommands: [
     {
@@ -276,6 +312,7 @@ app.registerExtension({
   async setup() {
     installFetchHook();
     listenForStatus();
+    registerSidebarTab();
     // The action bar renders after setup; refresh once it exists.
     requestAnimationFrame(() => setTimeout(refreshToggle, 500));
     await refreshStatus();

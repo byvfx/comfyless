@@ -39,7 +39,7 @@ KEEP_FINISHED_S = 15 * 60
 COMMON_FOLDERS = ["checkpoints", "loras", "vae", "text_encoders", "diffusion_models", "controlnet",
                   "upscale_models", "clip_vision", "embeddings"]
 _ACTIVE = ("starting", "preparing", "running")
-_REDEPLOY = "Update the cloud worker first: Extensions → Modal Cloud → Check setup → Deploy."
+_REDEPLOY = "Update the cloud worker first: in the Modal Cloud tab (the cloud icon on the left), open Check setup and click Deploy."
 
 
 def model_folders() -> list[str]:

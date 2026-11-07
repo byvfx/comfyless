@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import modal.exception as mx
 
-SETUP_HINT = "Open Extensions → Modal Cloud → Setup."
+SETUP_HINT = "Open the Modal Cloud tab (the cloud icon on the left) and click Set up."
 
 
 class BridgeError(Exception):
