@@ -2,6 +2,7 @@
 // configure is done here, with no terminal: sign in, optional keys, deploy, test run.
 // Imported by modal_bridge.js; this module registers nothing on its own.
 import { api } from "../../scripts/api.js";
+import { app } from "../../scripts/app.js";
 
 const BUDGETS_URL = "https://modal.com/docs/guide/budgets";
 const STYLE_ID = "modal-bridge-style";
@@ -56,6 +57,18 @@ const CSS = `
 .mb-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #6b7280; }
 .mb-dot.on { background: #22c55e; } .mb-dot.bad { background: #ef4444; }
 .mb-btn.danger { background: transparent; color: #ef4444; border: 1px solid #ef4444; }
+.mb-packs > summary { cursor: pointer; font-size: 13px; opacity: .85; padding: 4px 0; }
+.mb-group { font-size: 11px; opacity: .6; margin: 10px 0 0; text-transform: uppercase; letter-spacing: .6px; }
+.mb-pack { padding: 8px 0; border-bottom: 1px solid var(--border-color, #333); font-size: 13px; }
+.mb-pack:last-child { border-bottom: 0; }
+.mb-pack-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.mb-pack-head strong { font-size: 14px; }
+.mb-pack .mb-muted { margin: 2px 0 0; }
+.mb-pack .mb-row { margin-top: 6px; }
+.mb-pack .mb-btn { padding: 3px 10px; font-size: 13px; }
+.mb-pack details { font-size: 12px; opacity: .8; flex: 1 1 100%; }
+.mb-pack details > summary { cursor: pointer; }
+.mb-pack .mb-files { margin: 4px 0 0; padding-left: 18px; }
 `;
 
 // Build DOM without innerHTML, so server text (errors, log lines) is never parsed as HTML.
@@ -401,13 +414,15 @@ let modelsOpen = null;
 
 export async function openModels({ onChanged } = {}) {
   if (modelsOpen) return;
-  const ui = { list: null, error: null, busy: {}, actionError: null, confirm: null, filter: "" };
+  const ui = { list: null, error: null, busy: {}, actionError: null, confirm: null, filter: "",
+    packs: null, packsError: null, packsOpen: false, packMsg: null };
   const onTransfers = ({ detail }) => {
     if (!ui.list) return;
     const before = new Map((ui.list.transfers || []).map((t) => [t.id, t.state]));
     ui.list.transfers = detail.transfers || [];
     renderTransfers();
     renderLists();
+    renderPacks();
     if (ui.list.transfers.some((t) => t.state === "done" && before.has(t.id) && before.get(t.id) !== "done")) load();
   };
   api.addEventListener("modal_bridge.models", onTransfers);
@@ -426,6 +441,7 @@ export async function openModels({ onChanged } = {}) {
   const addMsg = h("div");
   const filter = h("input", { class: "mb-input", placeholder: "Filter models", autocomplete: "off", "aria-label": "Filter models",
     oninput: () => { ui.filter = filter.value.trim().toLowerCase(); renderLists(); } });
+  const packsBox = h("div");
   const transfersBox = h("div");
   const cloudBox = h("div");
   const localBox = h("div");
@@ -440,17 +456,20 @@ export async function openModels({ onChanged } = {}) {
       h("div", { class: "mb-row" }, url),
       h("div", { class: "mb-row" }, folder, filename, addBtn),
       addMsg),
+    packsBox,
     transfersBox,
     h("div", { class: "mb-step" }, h("div", { class: "mb-row" }, filter), cloudBox),
     h("div", { class: "mb-step" }, localBox));
 
   async function load() {
+    const packs = call("/modal_bridge/models/packs").then((r) => { ui.packs = r.packs; ui.packsError = null; }, (e) => { ui.packsError = e.message; });
     try {
       ui.list = await call("/modal_bridge/models");
       ui.error = null;
     } catch (e) {
       ui.error = e.message;
     }
+    await packs;
     render();
   }
 
@@ -487,8 +506,73 @@ export async function openModels({ onChanged } = {}) {
     addBtn.disabled = !ui.list || !!ui.busy.add;
     addBtn.textContent = ui.busy.add ? "Starting..." : "Download to cloud";
     fill(addMsg, ui.actionError ? h("p", { class: "mb-fail" }, ui.actionError) : "");
+    renderPacks();
     renderTransfers();
     renderLists();
+  }
+
+  // -- starter packs: curated open-weight model sets with the ComfyUI templates that use them --
+
+  const PACK_INTRO = "Open-weight models that run on your Modal GPU, with ComfyUI's own templates for them. Add a pack, then open one " +
+    "of its workflows: the model names already match the files in your cloud. Load your own image in the Load Image nodes.";
+
+  function packStatus(pack) {
+    const active = new Set((ui.list?.transfers || []).filter((t) => ACTIVE.includes(t.state)).map((t) => `${t.folder}/${t.name}`));
+    const have = pack.files.filter((f) => f.have).length;
+    const transferring = pack.files.some((f) => !f.have && (f.transferring || active.has(f.path)));
+    return { have, transferring, complete: have === pack.files.length };
+  }
+
+  function renderPacks() {
+    if (!ui.packs && !ui.packsError) return;
+    const groups = [];
+    for (const p of ui.packs || []) {
+      const g = groups.find((x) => x.name === p.group) || groups[groups.push({ name: p.group, packs: [] }) - 1];
+      g.packs.push(p);
+    }
+    const details = h("details", { class: "mb-packs", ontoggle: (e) => { ui.packsOpen = e.target.open; } },
+      h("summary", {}, ui.packs ? `${ui.packs.length} packs: Qwen Image, Flux Kontext, SDXL, depth and normal passes, mattes, upscaling, Wan video` : "Starter packs"),
+      ui.packsError ? h("p", { class: "mb-fail" }, ui.packsError) : null,
+      ui.packMsg ? h("p", { class: "mb-fail" }, ui.packMsg) : null,
+      groups.flatMap((g) => [h("div", { class: "mb-group" }, g.name), ...g.packs.map(packView)]));
+    if (ui.packsOpen) details.open = true;
+    fill(packsBox, h("div", { class: "mb-step" }, h("h3", {}, "Starter packs"), h("p", { class: "mb-muted" }, PACK_INTRO), details));
+  }
+
+  function packView(pack) {
+    const { have, transferring, complete } = packStatus(pack);
+    const status = complete ? h("span", { class: "mb-ok" }, "In your cloud")
+      : transferring ? h("span", { class: "mb-muted" }, "Downloading...")
+      : have ? h("span", { class: "mb-muted" }, `${have} of ${pack.files.length} files in your cloud`) : null;
+    const addLabel = complete ? "Added" : transferring ? "Downloading..." : have ? `Add the rest (${formatBytes(pack.missing_size)})` : `Add to cloud (${formatBytes(pack.size)})`;
+    return h("div", { class: "mb-pack" },
+      h("div", { class: "mb-pack-head" }, h("strong", {}, pack.title), h("span", { class: "mb-size" }, `${formatBytes(pack.size)} · ${pack.gpu}`), status),
+      h("div", { class: "mb-muted" }, pack.blurb),
+      h("div", { class: "mb-row" },
+        h("button", { class: complete ? "mb-btn secondary" : "mb-btn", disabled: complete || transferring || !!ui.busy[`pack-${pack.id}`],
+          onclick: () => act(`pack-${pack.id}`, () => call("/modal_bridge/models/packs/download", { id: pack.id })) }, addLabel),
+        pack.templates.map((t) => h("button", { class: "mb-btn secondary", disabled: !t.available || !!ui.busy[`tpl-${t.name}`],
+          title: t.available ? `Open ComfyUI's "${t.name}" template` : "This ComfyUI doesn't have that template yet. Update ComfyUI.",
+          onclick: () => openTemplate(t.name) }, `Open: ${t.label}`)),
+        h("details", {}, h("summary", {}, `${pack.files.length} file${pack.files.length === 1 ? "" : "s"}`),
+          h("ul", { class: "mb-files" }, pack.files.map((f) => h("li", {}, `${f.have ? "✓ " : ""}${f.path} (${formatBytes(f.size)})`))))));
+  }
+
+  async function openTemplate(name) {
+    ui.busy[`tpl-${name}`] = true;
+    ui.packMsg = null;
+    renderPacks();
+    try {
+      const res = await fetch(api.fileURL ? api.fileURL(`/templates/${name}.json`) : `/templates/${name}.json`);
+      if (!res.ok) throw new Error(`Couldn't load the template (${res.status}). Update ComfyUI to get it.`);
+      const json = await res.json();
+      d.close();
+      await app.loadGraphData(json, true, true, name);
+    } catch (e) {
+      ui.busy[`tpl-${name}`] = false;
+      ui.packMsg = e.message;
+      renderPacks();
+    }
   }
 
   function renderTransfers() {

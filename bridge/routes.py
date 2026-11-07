@@ -4,7 +4,7 @@ POST /modal_bridge/prompt mirrors POST /prompt: same request body, same response
 400 + node_errors), so the frontend's error display and node highlighting work unchanged.
 
 /modal_bridge/setup/*, /modal_bridge/health and the cloud model manager (/modal_bridge/models,
-/modal_bridge/models/*) drive the setup dialogs. They only answer requests
+/modal_bridge/models/*, including the starter packs) drive the setup dialogs. They only answer requests
 from this computer: with --listen, someone else on the network could otherwise read a sign-in link
 and attach this ComfyUI to their own Modal account, or redeploy it.
 """
@@ -414,6 +414,19 @@ def setup() -> None:
         return await _models_action(
             request, lambda b: _models.start_download(b.get("url", ""), b.get("folder", ""), b.get("filename", "")),
             "login", "deploy", "stopping")
+
+    @routes.get("/modal_bridge/models/packs")
+    async def get_model_packs(request: web.Request):
+        if (denied := _local_only(request, mutating=False)) is not None:
+            return denied
+        try:
+            return web.json_response(await _models.packs())
+        except Exception as exc:
+            return web.json_response({"error": errors.friendly(exc)}, status=502)
+
+    @routes.post("/modal_bridge/models/packs/download")
+    async def post_model_pack_download(request: web.Request):
+        return await _models_action(request, lambda b: _models.start_pack(b.get("id", "")), "login", "deploy", "stopping")
 
     @routes.post("/modal_bridge/models/upload")
     async def post_model_upload(request: web.Request):

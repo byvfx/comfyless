@@ -27,7 +27,7 @@ import folder_paths
 import modal
 from server import PromptServer
 
-from . import errors
+from . import errors, model_packs
 from .modal_client import get_client
 from .models_sync import _NON_MODEL_KINDS, PLACEHOLDER_ROOT
 
@@ -230,6 +230,35 @@ class ModelManager:
         t = self._new("download", folder, shown)
         self._run(self._download(t, direct, f"{folder}/{filename}" if filename else f"{folder}/"))
         return t
+
+    async def packs(self) -> dict:
+        """The starter packs, with which of their files are in the cloud and which are still transferring."""
+        cloud = {path: size for path, size in await get_client().list_model_files()}
+        active = {f"{t['folder']}/{t['name']}" for t in self.transfers.values() if t["state"] in _ACTIVE}
+        packs = model_packs.listing(cloud)
+        for pack in packs:
+            for f in pack["files"]:
+                f["transferring"] = f["path"] in active
+        return {"packs": packs}
+
+    async def start_pack(self, pack_id: str) -> dict:
+        """Download the pack's files that aren't in the cloud yet. Files already there or already downloading are left alone."""
+        pack = model_packs.get(pack_id)
+        if pack is None:
+            raise errors.BridgeError("Unknown starter pack.")
+        cloud = {path for path, _ in await get_client().list_model_files()}
+        active = {f"{t['folder']}/{t['name']}" for t in self.transfers.values() if t["state"] in _ACTIVE}
+        started = []
+        for path in pack.files:
+            if path in cloud or path in active:
+                continue
+            folder, _, name = path.partition("/")
+            self._check_folder(folder)
+            url, _size = model_packs.FILES[path]
+            t = self._new("download", folder, name)
+            self._run(self._download(t, url, path))
+            started.append(t)
+        return {"started": started}
 
     async def _download(self, t: dict, url: str, dest: str) -> None:
         client = get_client()

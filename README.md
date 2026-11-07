@@ -44,7 +44,9 @@ Your cloud has its own model storage, separate from your computer. Open the **Mo
 - **Upload:** in the **Only on this computer** list, click **Upload** next to a model you already have. This uses your own connection, so big checkpoints take a while.
 - **Delete** removes a model from the cloud (click twice to confirm). A copy on your computer stays.
 
-Cloud models appear in ComfyUI's model lists as soon as a transfer finishes.
+- **Starter packs:** the same window lists ready-made sets of open-weight models, each with ComfyUI's own templates for it: Qwen Image (text to image, edits, cutouts with transparency), Flux Kontext, SDXL, and tools for CG work such as depth and normal passes, mattes, upscaling, frame interpolation and Wan video. Click **Add to cloud** on a pack, then **Open** one of its workflows: the model names already match the files in your cloud, so it runs as is. These run on your Modal GPU and bill only Modal.
+
+Cloud models appear in ComfyUI's model lists as soon as a transfer finishes. The packs, with settings and GPU picks, are described in more detail on the [wiki](https://github.com/byvfx/comfyless/wiki).
 
 If you skip this step, a workflow that needs a model the cloud doesn't have stops before anything is sent, and offers to upload just those models:
 
