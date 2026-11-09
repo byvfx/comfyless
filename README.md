@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/icon.png" alt="Comfyless logo: a contented red cloud with a power cord and plug" width="128" align="right">
+<p align="center"><img src="https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/icon.png" alt="Comfyless logo: a contented red cloud with a power cord and plug" width="128"></p>
 
 # Comfyless
 
