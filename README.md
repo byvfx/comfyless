@@ -6,9 +6,7 @@
 
 Comfyless adds a **Local / Cloud** switch next to ComfyUI's Run button. With Cloud on, your workflow runs on a fast GPU (L40S, A100 or H100) in your own [Modal](https://modal.com) account, and the results appear in ComfyUI as if they ran on your computer. No server to manage, no terminal, and nothing runs (or costs) while you're not generating.
 
-> This repository is a mirror of the `comfyless/` folder in [byvfx/comfy-serverless](https://github.com/byvfx/comfy-serverless), where development, the design spec and issues live. Please open issues and pull requests there.
-
-Release notes are in [CHANGELOG.md](CHANGELOG.md).
+Release notes are in [CHANGELOG.md](CHANGELOG.md). Issues and pull requests belong in this repository.
 
 ## Quickstart
 
@@ -74,8 +72,8 @@ The same page sets **Keep GPU warm for**: how long the GPU stays on after a run.
 
 You pay Modal directly, by the second, only while a cloud GPU is on. Measured with SDXL (1024×1024, 30 steps):
 
-- **L40S (default):** about $1.95 an hour while on. A warm SDXL image takes about 6 to 7 seconds when the GPU is in North America (6.3 to 6.6 seconds in us-east on 2026-11-06) and about 8 to 9 seconds in the 2026-11-09 run in Asia. About 4 to 5 seconds of that is the GPU itself. The GPU time is well under a cent.
-- **Starting a GPU** after a break takes about 45 seconds. Cold SDXL runs measured about 40 to 60 seconds.
+- **L40S (default):** about $1.95 an hour while on. A warm image usually takes a few seconds, and that GPU time is well under a cent.
+- **Starting a GPU** after a break takes about 45 seconds, the cold-start time shown on **Keep GPU warm for** in Settings.
 - **After a run, the GPU stays on** for a few minutes (5 by default, adjustable) so your next run starts instantly. That idle time is billed too and is usually most of the cost of a single image: one image on its own costs about 20 cents with the 5-minute default, or about 7 cents with 1 minute. Ten images in a row cost about a cent each.
 
 Modal's free plan includes monthly credit. **Check setup and spending** in the **Modal Cloud** tab shows what Modal billed this app today and this month, and whether any cloud GPU is on right now:
