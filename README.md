@@ -70,7 +70,7 @@ The same page sets **Keep GPU warm for**: how long the GPU stays on after a run.
 
 ## What it costs
 
-You pay Modal directly, by the second, only while a cloud GPU is on. Measured with SDXL (1024×1024, 30 steps):
+You pay Modal directly, by the second, only while a cloud GPU is on. Example: SDXL, 1024×1024, 30 steps:
 
 - **L40S (default):** about $1.95 an hour while on. A warm image usually takes a few seconds, and that GPU time is well under a cent.
 - **Starting a GPU** after a break takes about 45 seconds, the cold-start time shown on **Keep GPU warm for** in Settings.
