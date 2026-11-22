@@ -1,0 +1,28 @@
+# Unit tests for the bridge and the cloud worker's helpers. They need neither ComfyUI nor a Modal
+# account: tests/conftest.py stands in for ComfyUI's modules.
+# Run from the repository root. bridge/ and backend/ live here; there is no comfyless/ subfolder.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest

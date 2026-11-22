@@ -1,0 +1,7 @@
+# Keep the Comfy Registry archive to the node itself. `comfy node publish` zips
+# git-tracked files, so these development files would otherwise ship with the node.
+tests/
+pytest.ini
+requirements-dev.txt
+.github/workflows/tests.yml
+.comfyignore
