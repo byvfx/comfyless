@@ -6,6 +6,8 @@ All notable changes to Comfyless are recorded here. The format follows [Keep a C
 
 - Centered the logo above the title in the README.
 - Clarified the README: which ComfyUI version the cloud runs, how custom node packs are installed, and that each starter pack shows its GPU.
+- The test suite now lives in this repository and runs in CI on Ubuntu and Windows with Python 3.10 and 3.12.
+- Documented how to install the dev dependencies and run pytest.
 
 ## [0.3.5] - 2026-11-08
 

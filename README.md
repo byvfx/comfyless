@@ -131,6 +131,17 @@ Limitations for now: cloud jobs don't appear in the queue panel, and packs that 
 - When a workflow uses partner nodes, your Comfy sign-in token travels with the job to your Modal container, as it does to your local ComfyUI, and is used there only to call Comfy's API. It isn't stored anywhere in the cloud.
 - Setup can only be changed from the computer running ComfyUI.
 
+## Running tests
+
+From the repository root. `pyproject.toml` requires Python 3.10 or newer:
+
+```
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Those two commands are what the Tests workflow runs. Pinned dev dependency versions are in `requirements-dev.txt`. `pytest.ini` collects `tests/` and adds `-q --confcutdir=tests`. The workflow runs them on Ubuntu and Windows (`ubuntu-latest`, `windows-latest`) with Python 3.10 and 3.12.
+
 ## License
 
 GPL-3.0, the same as ComfyUI. See [LICENSE](LICENSE).
