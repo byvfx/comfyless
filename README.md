@@ -6,11 +6,11 @@
 
 Comfyless adds a **Local / Cloud** switch next to ComfyUI's Run button. With Cloud on, your workflow runs on a fast GPU (L40S, A100 or H100) in your own [Modal](https://modal.com) account, and the results appear in ComfyUI as if they ran on your computer. No server to manage, no terminal, and nothing runs (or costs) while you're not generating.
 
-> This repository is a mirror of the `comfyless/` folder in [byvfx/comfy-serverless](https://github.com/byvfx/comfy-serverless), where development, the design spec and issues live. Please open issues and pull requests there.
+Release notes are in [CHANGELOG.md](CHANGELOG.md). Issues and pull requests belong in this repository.
 
 ## Quickstart
 
-You need ComfyUI (0.44 or newer) and about 10 minutes. A Modal account is free to create.
+You need ComfyUI and about 10 minutes. A Modal account is free to create. The cloud worker uses your ComfyUI release when it is v0.44.0 or newer, and v0.44.0 if yours is older.
 
 ### 1. Install
 
@@ -20,7 +20,7 @@ If the search finds nothing (new versions wait for a Comfy Registry review), use
 
 ### 2. Set up
 
-After the restart, the **Modal Cloud setup** window opens by itself. Everything Comfyless does is in the **Modal Cloud** tab: click the **cloud icon** in ComfyUI's left sidebar. Reopen setup there any time with **Set up**. (The same commands are also in the main menu under **Extensions → Modal Cloud**.)
+After the restart, the **Modal Cloud setup** window opens by itself. Everything Comfyless does is in the **Modal Cloud** tab: click the **cloud icon** in ComfyUI's left sidebar. Reopen setup there any time with **Set up: sign in, deploy, test**. (The same commands are also in the main menu under **Extensions → Modal Cloud**.)
 
 ![Setup: connect your Modal account and add optional download keys](https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/setup-1-sign-in.png)
 
@@ -29,7 +29,7 @@ After the restart, the **Modal Cloud setup** window opens by itself. Everything 
 
 ![Setup: install the cloud worker and run a test](https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/setup-2-deploy.png)
 
-3. **Install the cloud worker.** Click **Deploy**. This sets up ComfyUI in your Modal account and copies your custom node packs. The first time takes 3 to 6 minutes, with the progress shown in the window.
+3. **Install the cloud worker.** Click **Deploy**. This sets up ComfyUI in your Modal account and mirrors your custom node packs (the same Registry version or git commit, or an upload when a pack is neither). The first time takes 3 to 6 minutes, with the progress shown in the window.
 4. **Run a test.** This starts a cloud GPU and runs a tiny workflow. It takes about a minute, and the run itself costs a few cents. Afterwards the GPU stays on for the **Keep GPU warm for** time (5 minutes by default, about 16 cents on the L40S). If you're not going to run anything soon, click **Stop now** in *Check setup* to switch it off.
 
 Then set a monthly spending limit in Modal's dashboard ([how](https://modal.com/docs/guide/budgets)) and click **Finish**.
@@ -46,7 +46,7 @@ Your cloud has its own model storage, separate from your computer. Open the **Mo
 
 - **Starter packs:** the same window lists ready-made sets of open-weight models, each with ComfyUI's own templates for it: Qwen Image (text to image, edits, cutouts with transparency), Flux Kontext, Flux.2 Klein, SDXL, and tools for CG work such as depth and normal passes, mattes, upscaling, frame interpolation, LTX-2.3 video driven by your render passes, and Wan video. Click **Add to cloud** on a pack, then **Open** one of its workflows: the model names already match the files in your cloud, so it runs as is. These run on your Modal GPU and bill only Modal.
 
-Cloud models appear in ComfyUI's model lists as soon as a transfer finishes. The packs, with settings and GPU picks, are described in more detail on the [wiki](https://github.com/byvfx/comfyless/wiki).
+Cloud models appear in ComfyUI's model lists as soon as a transfer finishes. Each pack card shows its size and a GPU: L40S for every pack except **Wan 2.2 14B image to video**, which shows A100-80GB. **Open** loads ComfyUI's own template, so the sampler settings are the ones in that template. The [wiki](https://github.com/byvfx/comfyless/wiki) is only a welcome page, so it is not needed to install or run.
 
 If you skip this step, a workflow that needs a model the cloud doesn't have stops before anything is sent, and offers to upload just those models:
 
@@ -70,10 +70,10 @@ The same page sets **Keep GPU warm for**: how long the GPU stays on after a run.
 
 ## What it costs
 
-You pay Modal directly, by the second, only while a cloud GPU is on. Measured with SDXL (1024×1024, 30 steps):
+You pay Modal directly, by the second, only while a cloud GPU is on. Example: SDXL, 1024×1024, 30 steps:
 
-- **L40S (default):** about $1.95 an hour while on. A warm image takes about 5 seconds, roughly a cent.
-- **Starting a GPU** after a break takes 30 to 45 seconds.
+- **L40S (default):** about $1.95 an hour while on. A warm image usually takes a few seconds, and that GPU time is well under a cent.
+- **Starting a GPU** after a break takes about 45 seconds, the cold-start time shown on **Keep GPU warm for** in Settings.
 - **After a run, the GPU stays on** for a few minutes (5 by default, adjustable) so your next run starts instantly. That idle time is billed too and is usually most of the cost of a single image: one image on its own costs about 20 cents with the 5-minute default, or about 7 cents with 1 minute. Ten images in a row cost about a cent each.
 
 Modal's free plan includes monthly credit. **Check setup and spending** in the **Modal Cloud** tab shows what Modal billed this app today and this month, and whether any cloud GPU is on right now:
@@ -89,16 +89,19 @@ Modal's free plan includes monthly credit. **Check setup and spending** in the *
 ## How to update
 
 1. In **Manager → Custom Nodes Manager**, update **Comfyless** and restart ComfyUI.
-2. Open the **Modal Cloud** tab, click **Set up**, then **Deploy again**. *Check setup* also tells you when the cloud needs it.
+2. Open the **Modal Cloud** tab, click **Set up: sign in, deploy, test**, then **Deploy again**. *Check setup* also tells you when the cloud needs it.
 
 Deploy again after adding or updating custom node packs too.
 
 ## Custom nodes
 
 Your packs in `custom_nodes/` are mirrored to the cloud when you deploy:
-- Packs from the Comfy Registry or git are installed at the same version; others are uploaded from your computer.
+
+- Packs from the Comfy Registry are installed at the same version, and git checkouts at the same commit. Anything else is uploaded from your computer.
 - Packs that don't install in the cloud are listed in the deploy log and in *Check setup*.
 - A workflow that needs one of them is stopped before it runs, with the node highlighted.
+
+The cloud runs this computer's ComfyUI release when that release is v0.44.0 or newer, and v0.44.0 otherwise. *Check setup* says when the two versions differ.
 
 ## Troubleshooting
 
@@ -113,7 +116,7 @@ Your packs in `custom_nodes/` are mirrored to the cloud when you deploy:
 | "...billing or spending limit" | Check your Modal billing page; you may have hit your spending limit. |
 | A download says it was refused (401/403) | The model needs a key (**Setup**, step 2), or you need to accept its license on the model's page first. |
 | "That link opened a web page, not a file" | Use the file's download link. On Hugging Face, open the file in the **Files** tab and copy the link from there. |
-| The first run after a break is slow | Starting a GPU takes 30 to 45 seconds. Later runs are fast while it stays warm. |
+| The first run after a break is slow | Starting a GPU takes about 45 seconds. Later runs are fast while it stays warm. |
 | Comfyless isn't in Manager's list | Wait a moment for the list to finish loading and search again. Or use **Install via Git URL** with `https://github.com/byvfx/comfyless`. |
 | Installing from Manager fails with `CERTIFICATE_VERIFY_FAILED` | Common on a brand-new Windows, which adds a site's certificate only when Windows itself visits it. Open `https://cdn.comfy.org` once in Edge, then click **Install** again. |
 | ComfyUI won't start: "Visual C++ Redistributable is not installed" or an error loading `c10.dll` | ComfyUI needs Microsoft's Visual C++ runtime, which a brand-new Windows doesn't have. Install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and start ComfyUI again. |
