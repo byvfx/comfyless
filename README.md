@@ -140,7 +140,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Those two commands are what the Tests workflow runs. `requirements-dev.txt` pins `modal==1.6.3`, `pytest==9.2.0`, and `aiohttp==3.14.5`. `pytest.ini` collects `tests/` and adds `-q --confcutdir=tests`. The workflow runs them on Ubuntu and Windows (`ubuntu-latest`, `windows-latest`) with Python 3.10 and 3.12.
+Those two commands are what the Tests workflow runs. Pinned dev dependency versions are in `requirements-dev.txt`. `pytest.ini` collects `tests/` and adds `-q --confcutdir=tests`. The workflow runs them on Ubuntu and Windows (`ubuntu-latest`, `windows-latest`) with Python 3.10 and 3.12.
 
 ## License
 
