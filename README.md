@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/icon.png" alt="Comfyless logo: a contented red cloud with a power cord and plug" width="128"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/icon.png" alt="Comfyless icon: a warm persimmon cloud with a plug cut from the bottom, on a dark rounded tile" width="128"></p>
 
 # Comfyless
 
@@ -20,7 +20,7 @@ If the search finds nothing (new versions wait for a Comfy Registry review), use
 
 ### 2. Set up
 
-After the restart, the **Modal Cloud setup** window opens by itself. Everything Comfyless does is in the **Modal Cloud** tab: click the **cloud icon** in ComfyUI's left sidebar. Reopen setup there any time with **Set up: sign in, deploy, test**. (The same commands are also in the main menu under **Extensions → Modal Cloud**.)
+After the restart, the **Comfyless setup** window opens by itself. Everything Comfyless does is in the **Comfyless** tab: click the **cloud icon** in ComfyUI's left sidebar. Reopen setup there any time with **Set up: sign in, deploy, test**. (The same commands are also in the main menu under **Extensions → Comfyless**.)
 
 ![Setup: connect your Modal account and add optional download keys](https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/setup-1-sign-in.png)
 
@@ -36,7 +36,7 @@ Then set a monthly spending limit in Modal's dashboard ([how](https://modal.com/
 
 ### 3. Add models
 
-Your cloud has its own model storage, separate from your computer. Open the **Modal Cloud** tab (cloud icon on the left) and click **Cloud models**:
+Your cloud has its own model storage, separate from your computer. Open the **Comfyless** tab (cloud icon on the left) and click **Cloud models**:
 
 ![Cloud models: add a model from a link, and the models in your cloud](https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/cloud-models.png)
 
@@ -62,7 +62,7 @@ Progress, live previews, errors and images show in ComfyUI as normal, and output
 
 **Partner nodes** (Nano Banana, Qwen, Kling, OpenAI and the other nodes under *partner*) work on the cloud too. They use your Comfy account exactly as they do locally, so sign in to Comfy (the account button in the top-right) or add your API key first. They bill your Comfy account, not Modal.
 
-Choose the GPU in **Settings → Modal Cloud**:
+Choose the GPU in **Settings → Comfyless**:
 - **L40S** (default): good for most image work.
 - **A100-80GB** or **H100**: for big video models, or anything that runs out of memory. The H100 is about twice the price and faster.
 
@@ -76,20 +76,20 @@ You pay Modal directly, by the second, only while a cloud GPU is on. Example: SD
 - **Starting a GPU** after a break takes about 45 seconds, the cold-start time shown on **Keep GPU warm for** in Settings.
 - **After a run, the GPU stays on** for a few minutes (5 by default, adjustable) so your next run starts instantly. That idle time is billed too and is usually most of the cost of a single image: one image on its own costs about 20 cents with the 5-minute default, or about 7 cents with 1 minute. Ten images in a row cost about a cent each.
 
-Modal's free plan includes monthly credit. **Check setup and spending** in the **Modal Cloud** tab shows what Modal billed this app today and this month, and whether any cloud GPU is on right now:
+Modal's free plan includes monthly credit. **Check setup and spending** in the **Comfyless** tab shows what Modal billed this app today and this month, and whether any cloud GPU is on right now:
 
 ![Check setup: cloud containers on now, spending, and Stop now](https://raw.githubusercontent.com/byvfx/comfyless/main/docs/images/check-setup.png)
 
 ## How to stop paying
 
-- **Right now:** click **Stop now** in *Check setup*, or click **Stop cloud GPUs now** in the **Modal Cloud** tab. This cancels running cloud jobs **and cloud model downloads**, and switches every cloud GPU off at once, instead of waiting out the idle time. A cancelled download has to be started again. Your deployed cloud worker and the models already in your cloud stay as they are, and your next run starts the GPU again.
+- **Right now:** click **Stop now** in *Check setup*, or click **Stop cloud GPUs now** in the **Comfyless** tab. This cancels running cloud jobs **and cloud model downloads**, and switches every cloud GPU off at once, instead of waiting out the idle time. A cancelled download has to be started again. Your deployed cloud worker and the models already in your cloud stay as they are, and your next run starts the GPU again.
 - **Day to day:** nothing to do. GPUs switch off by themselves after the **Keep GPU warm for** time. A shorter time costs less per image, and a longer one makes back-to-back runs faster.
 - **For good:** in the [Modal dashboard](https://modal.com/apps), stop the app `comfy-modal-bridge`. Then, under **Storage**, delete the volumes `comfy-models` (your cloud models) and `comfy-io`. Uninstall Comfyless from ComfyUI-Manager if you no longer want the switch.
 
 ## How to update
 
 1. In **Manager → Custom Nodes Manager**, update **Comfyless** and restart ComfyUI.
-2. Open the **Modal Cloud** tab, click **Set up: sign in, deploy, test**, then **Deploy again**. *Check setup* also tells you when the cloud needs it.
+2. Open the **Comfyless** tab, click **Set up: sign in, deploy, test**, then **Deploy again**. *Check setup* also tells you when the cloud needs it.
 
 Deploy again after adding or updating custom node packs too.
 
@@ -111,7 +111,7 @@ The cloud runs this computer's ComfyUI release when that release is v0.44.0 or n
 | "Can't reach your Modal app" or "The cloud backend isn't deployed" | Open **Setup** and click **Deploy**. |
 | "Some models are only on this computer" | Click **Upload** in the window that opens, or add the model in **Cloud models**. |
 | "Some nodes aren't available in the cloud" | **Deploy again**. If the node's pack failed to install, *Check setup* says why; run that workflow locally for now. |
-| "The cloud GPU ran out of memory" | Pick **A100-80GB** or **H100** in **Settings → Modal Cloud**, or lower the resolution or batch size. |
+| "The cloud GPU ran out of memory" | Pick **A100-80GB** or **H100** in **Settings → Comfyless**, or lower the resolution or batch size. |
 | "Modal has no free GPUs of this type right now" | Try again in a moment, or pick another GPU. |
 | "...billing or spending limit" | Check your Modal billing page; you may have hit your spending limit. |
 | A download says it was refused (401/403) | The model needs a key (**Setup**, step 2), or you need to accept its license on the model's page first. |

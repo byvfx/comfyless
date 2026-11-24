@@ -1,9 +1,9 @@
-// Modal Cloud Bridge: while "Run on Cloud" is on, queued prompts go to the bridge's
+// Comfyless: while "Run on Cloud" is on, queued prompts go to the bridge's
 // /modal_bridge/prompt route instead of /prompt. That route mirrors /prompt's request and
 // response, so the frontend's own queueing, error display and progress tracking keep working.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { openHealth, openMissingModels, openModels, openSetup, stopNow } from "./setup_wizard.js";
+import { ensureStyle, openHealth, openMissingModels, openModels, openSetup, stopNow } from "./setup_wizard.js";
 import { renderCloudPanel } from "./cloud_panel.js";
 
 const EXT = "ModalBridge";
@@ -20,7 +20,7 @@ const cloudJobs = new Set();
 let runningPromptId = null;
 // Last /modal_bridge/status answer; updated by modal_bridge.connection events.
 let status = { connected: false, setup_done: true };
-// The Modal Cloud sidebar tab while it's open; null when closed.
+// The Comfyless sidebar tab while it's open; null when closed.
 let panel = null;
 
 const toggleButton = {
@@ -45,7 +45,8 @@ function refreshToggle() {
   const on = !!setting(SETTING.enabled);
   toggleButton.label = on ? `Cloud · ${setting(SETTING.gpu)}` : "Local";
   for (const el of document.querySelectorAll(`.${TOGGLE_CLASS}`)) {
-    el.style.color = on ? "var(--p-primary-color, #3b82f6)" : "";
+    el.classList.toggle("mb-cloud-on", on);
+    el.style.color = "";
     el.style.opacity = on ? "1" : "0.6";
     el.title = on
       ? `Run on Cloud: ON (${setting(SETTING.gpu)}). Click to run locally.`
@@ -102,13 +103,14 @@ async function syncModels() {
 }
 
 function registerSidebarTab() {
-  // Older frontends have no sidebar API; the Extensions > Modal Cloud menu still works there.
+  // Older frontends have no sidebar API; the Extensions > Comfyless menu still works there.
   if (typeof app.extensionManager.registerSidebarTab !== "function") return;
+  ensureStyle();
   app.extensionManager.registerSidebarTab({
     id: "modal-cloud",
-    icon: "icon-[lucide--cloud]",
-    title: "Modal Cloud",
-    tooltip: "Modal Cloud: setup, cloud models, stop GPUs",
+    icon: "comfyless-mark",
+    title: "Comfyless",
+    tooltip: "Comfyless: setup, cloud models, stop GPUs",
     type: "custom",
     render: (el) => {
       panel?.dispose();
@@ -138,8 +140,8 @@ async function toggleCloud() {
   if (on && !status.connected) await refreshStatus(); // it may have connected since startup
   if (on && !status.connected) {
     // Turning cloud on without a working connection: send the user to setup instead.
-    if (status.broken) return toast("error", "Modal Cloud unavailable", status.error, 10000);
-    toast("warn", "Modal Cloud isn't set up yet", status.error || "Finish setup to run on the cloud.", 6000);
+    if (status.broken) return toast("error", "Comfyless unavailable", status.error, 10000);
+    toast("warn", "Comfyless isn't set up yet", status.error || "Finish setup to run on the cloud.", 6000);
     return showSetup();
   }
   await app.extensionManager.setting.set(SETTING.enabled, on);
@@ -233,7 +235,7 @@ function listenForStatus() {
     panel?.update();
     if (detail.connected && !was) {
       await app.refreshComboInNodes?.(); // cloud models just became available
-      toast("success", "Modal Cloud connected", "Turn on Run on Cloud next to the Run button.", 4000);
+      toast("success", "Comfyless connected", "Turn on Run on Cloud next to the Run button.", 4000);
     }
   });
   // Model uploads and downloads keep going after the Cloud models window closes; say when each ends.
@@ -267,7 +269,7 @@ app.registerExtension({
   settings: [
     {
       id: SETTING.enabled,
-      category: ["Modal Cloud", "Execution", "Enabled"],
+      category: ["Comfyless", "Execution", "Enabled"],
       name: "Run on Cloud",
       tooltip: "Send queued workflows to a GPU in your Modal account instead of running them here.",
       type: "boolean",
@@ -276,7 +278,7 @@ app.registerExtension({
     },
     {
       id: SETTING.gpu,
-      category: ["Modal Cloud", "Execution", "GPU"],
+      category: ["Comfyless", "Execution", "GPU"],
       name: "Cloud GPU",
       tooltip: "L40S is the cheapest; H100 is about twice the price and faster. Large video models may need 80 GB (A100-80GB or H100).",
       type: "combo",
@@ -286,7 +288,7 @@ app.registerExtension({
     },
     {
       id: SETTING.idleMinutes,
-      category: ["Modal Cloud", "Execution", "Idle"],
+      category: ["Comfyless", "Execution", "Idle"],
       name: "Keep GPU warm for (minutes)",
       tooltip: "After a run the GPU stays on this long so the next run skips the ~45 s cold start. You pay for this idle time. Changing it starts a fresh GPU.",
       type: "slider",
@@ -304,12 +306,13 @@ app.registerExtension({
   ],
   menuCommands: [
     {
-      path: ["Extensions", "Modal Cloud"],
+      path: ["Extensions", "Comfyless"],
       commands: ["ModalBridge.Toggle", "ModalBridge.Setup", "ModalBridge.Health", "ModalBridge.Models", "ModalBridge.SyncModels", "ModalBridge.StopNow"],
     },
   ],
   actionBarButtons: [toggleButton],
   async setup() {
+    ensureStyle();
     installFetchHook();
     listenForStatus();
     registerSidebarTab();
@@ -317,13 +320,13 @@ app.registerExtension({
     requestAnimationFrame(() => setTimeout(refreshToggle, 500));
     await refreshStatus();
     if (status.broken) {
-      toast("error", "Modal Cloud unavailable", status.error, 12000);
+      toast("error", "Comfyless unavailable", status.error, 12000);
     } else if (!status.setup_done && !status.connected) {
       showSetup(); // first run after install
     } else if (!status.connected && setting(SETTING.enabled)) {
       // The bridge connects in the background at startup; only complain if it's still down shortly after.
       setTimeout(async () => {
-        if (!(await refreshStatus()).connected) toast("warn", "Modal Cloud not connected", status.error, 10000);
+        if (!(await refreshStatus()).connected) toast("warn", "Comfyless not connected", status.error, 10000);
       }, 8000);
     }
   },

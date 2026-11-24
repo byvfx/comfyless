@@ -435,7 +435,7 @@ class Setup:
                 if running:
                     add("running", "Cloud containers on now", "warn",
                         f"{running} running, and you pay while they're on. They switch off by themselves after the idle "
-                        "time in Settings → Modal Cloud. Stop now switches them off at once and cancels running cloud jobs.", "stop")
+                        "time in Settings → Comfyless. Stop now switches them off at once and cancels running cloud jobs.", "stop")
                 else:
                     add("running", "Cloud containers on now", "ok", "None. Nothing is running in the cloud, so nothing is costing you.")
             except Exception as exc:
