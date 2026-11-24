@@ -4,6 +4,8 @@ All notable changes to Comfyless are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+- The sidebar tab, menus, dialogs, and settings group are labeled Comfyless. Modal still means your Modal account.
+- Replaced the logo with the Unplugged mark: a warm persimmon cloud with a plug cut from the bottom, on a charcoal tile.
 - Centered the logo above the title in the README.
 - Clarified the README: which ComfyUI version the cloud runs, how custom node packs are installed, and that each starter pack shows its GPU.
 - The test suite now lives in this repository and runs in CI on Ubuntu and Windows with Python 3.10 and 3.12.

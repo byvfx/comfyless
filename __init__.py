@@ -16,7 +16,7 @@ try:
     routes.setup()
 except ImportError as exc:  # e.g. the modal package failed to install
     logging.error("[modal-bridge] disabled: %s", exc)
-    _reason = f"The Modal Cloud Bridge couldn't load ({exc}). Reinstall it from ComfyUI-Manager and restart ComfyUI."
+    _reason = f"Comfyless couldn't load ({exc}). Reinstall it from ComfyUI-Manager and restart ComfyUI."
 
     try:  # still answer the frontend's status check, so the user sees why instead of nothing
         from aiohttp import web

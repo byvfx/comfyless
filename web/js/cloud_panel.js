@@ -1,4 +1,4 @@
-// The Modal Cloud sidebar tab: everything Comfyless does, one click away, without the
+// The Comfyless sidebar tab: everything Comfyless does, one click away, without the
 // Extensions menu. Imported by modal_bridge.js; this module registers nothing on its own.
 import { ensureStyle, h } from "./setup_wizard.js";
 
@@ -16,7 +16,7 @@ export function renderCloudPanel(container, { state, refreshStatus, actions }) {
   const button = (label, onclick, cls = "mb-btn secondary") => h("button", { class: cls, onclick }, label);
 
   container.replaceChildren(h("div", { class: "mb-panel" },
-    h("h2", {}, "Modal Cloud"),
+    h("h2", { class: "mb-brand" }, h("span", { class: "comfyless-mark", "aria-hidden": "true" }), "Comfyless"),
     h("div", { class: "mb-status" }, dot, statusLine),
     jobsLine,
     toggle,
@@ -30,7 +30,7 @@ export function renderCloudPanel(container, { state, refreshStatus, actions }) {
     button("Refresh cloud model list", actions.syncModels),
     h("div", { class: "mb-label" }, "Spending"),
     button("Stop cloud GPUs now", actions.stop, "mb-btn danger"),
-    h("div", { class: "mb-muted" }, "How long a GPU stays warm after a run, and the rest: Settings → Modal Cloud."),
+    h("div", { class: "mb-muted" }, "How long a GPU stays warm after a run, and the rest: Settings → Comfyless."),
   ));
 
   function update() {

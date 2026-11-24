@@ -207,7 +207,7 @@ def setup() -> None:
             return _bad_request(
                 "prompt_outputs_failed_validation",
                 "Some nodes aren't available in the cloud",
-                "Mirror your custom nodes: in the Modal Cloud tab (the cloud icon on the left), open Check setup and click Deploy. Or run this workflow locally.",
+                "Mirror your custom nodes: in the Comfyless tab (the cloud icon on the left), open Check setup and click Deploy. Or run this workflow locally.",
                 unavailable,
             )
 
@@ -222,7 +222,7 @@ def setup() -> None:
             return _bad_request(
                 "prompt_outputs_failed_validation",
                 "Some models are only on this computer",
-                "Upload them from Cloud models in the Modal Cloud tab (the cloud icon on the left), or choose models that are in the cloud.",
+                "Upload them from Cloud models in the Comfyless tab (the cloud icon on the left), or choose models that are in the cloud.",
                 missing,
                 # The frontend offers to upload these (Upload missing models).
                 {"modal_bridge_missing_models": models},
@@ -242,7 +242,7 @@ def setup() -> None:
 
         input_files = await asyncio.to_thread(inputs_mod.collect, prompt, model_refs)
         if reason := _busy("login", "deploy", "stopping"):
-            return _bad_request("modal_busy", "Modal Cloud setup is in progress", reason)
+            return _bad_request("modal_busy", "Comfyless setup is in progress", reason)
         _runner.submit(
             CloudJob(
                 prompt_id=prompt_id,

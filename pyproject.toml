@@ -10,7 +10,7 @@ classifiers = ["Operating System :: OS Independent"]
 
 [project.urls]
 Repository = "https://github.com/byvfx/comfyless"
-"Bug Tracker" = "https://github.com/byvfx/comfy-serverless/issues"
+"Bug Tracker" = "https://github.com/byvfx/comfyless/issues"
 Documentation = "https://github.com/byvfx/comfyless#readme"
 
 [tool.comfy]

@@ -1,4 +1,4 @@
-// Modal Cloud setup wizard and "Check setup" panel (spec §7.2, §7.5). Everything a user must
+// Comfyless setup wizard and "Check setup" panel (spec §7.2, §7.5). Everything a user must
 // configure is done here, with no terminal: sign in, optional keys, deploy, test run.
 // Imported by modal_bridge.js; this module registers nothing on its own.
 import { api } from "../../scripts/api.js";
@@ -6,6 +6,9 @@ import { app } from "../../scripts/app.js";
 
 const BUDGETS_URL = "https://modal.com/docs/guide/budgets";
 const STYLE_ID = "modal-bridge-style";
+// Same A2 path as docs/images/icon-mono.svg, filled black. A CSS mask uses the alpha;
+// currentColor inside an SVG image does not follow the page color.
+const MARK_URL = new URL("./icon-mono.svg", import.meta.url).href;
 
 const CSS = `
 .mb-dialog { background: var(--comfy-menu-bg, #202020); color: var(--fg-color, #ddd); border: 1px solid var(--border-color, #444); border-radius: 10px;
@@ -84,6 +87,15 @@ const CSS = `
 .mb-pack details { font-size: 12px; opacity: .8; flex: 1 1 100%; }
 .mb-pack details > summary { cursor: pointer; }
 .mb-pack .mb-files { margin: 4px 0 0; padding-left: 18px; }
+.mb-brand { display: flex; align-items: center; gap: 8px; }
+.comfyless-mark { display: inline-block; width: 1.25rem; height: 1.25rem; flex: none; background-color: currentColor;
+  -webkit-mask-image: url("${MARK_URL}"); mask-image: url("${MARK_URL}");
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain; }
+.mb-brand .comfyless-mark { width: 22px; height: 22px; color: #F0784B; }
+.modal-bridge-toggle.mb-cloud-on i,
+.modal-bridge-toggle.mb-cloud-on [class*="lucide--cloud"] { color: #F0784B; }
 `;
 
 // Build DOM without innerHTML, so server text (errors, log lines) is never parsed as HTML.
@@ -172,7 +184,7 @@ export async function openSetup({ gpu, scaledownS, onDone } = {}) {
   const onConnection = () => refresh();
   api.addEventListener("modal_bridge.deploy", onDeploy);
   api.addEventListener("modal_bridge.connection", onConnection);
-  const d = dialog("Modal Cloud setup", () => {
+  const d = dialog("Comfyless setup", () => {
     api.removeEventListener("modal_bridge.deploy", onDeploy);
     api.removeEventListener("modal_bridge.connection", onConnection);
     clearInterval(ui.loginPoll);
@@ -330,7 +342,7 @@ export async function stopNow() {
 }
 
 export async function openHealth({ onFix } = {}) {
-  const d = dialog("Modal Cloud: check setup");
+  const d = dialog("Comfyless: check setup");
   let stopped = null; // the result of Stop now, shown above the refreshed checks
 
   // Two clicks, since it cancels running jobs.
